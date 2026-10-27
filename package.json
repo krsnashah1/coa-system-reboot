@@ -9,12 +9,17 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@vercel/kv": "^3.0.0",
+    "framer-motion": "^14.7.1",
+    "howler": "^2.2.4",
     "next": "16.4.3",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "zustand": "^5.0.16"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
+    "@types/howler": "^2.2.13",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

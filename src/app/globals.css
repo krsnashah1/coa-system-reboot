@@ -1,26 +1,23 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-mono), ui-monospace, monospace;
 }
+
+.glow-text { text-shadow: 0 0 8px rgba(34,211,238,.8), 0 0 20px rgba(34,211,238,.4); }
+.glow-border { box-shadow: 0 0 0 1px rgba(34,211,238,.6), 0 0 18px rgba(34,211,238,.35); }
+.glow-red { box-shadow: 0 0 0 1px rgba(244,63,94,.7), 0 0 22px rgba(244,63,94,.45); }
+.glow-green { box-shadow: 0 0 0 1px rgba(52,211,153,.7), 0 0 18px rgba(52,211,153,.4); }
+
+.scanlines {
+  background: repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0, rgba(0,0,0,0) 2px, rgba(0,0,0,.12) 3px);
+  mix-blend-mode: multiply;
+}
+
+@keyframes glitch {
+  0%,100% { transform: translate(0); filter: none; }
+  20% { transform: translate(-3px, 1px); filter: hue-rotate(90deg); }
+  40% { transform: translate(3px, -1px); }
+  60% { transform: translate(-2px, 2px); filter: hue-rotate(-90deg); }
+}
+.animate-glitch { animation: glitch .35s linear; }

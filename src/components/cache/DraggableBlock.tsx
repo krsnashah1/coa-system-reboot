@@ -1,0 +1,83 @@
+// src/components/cache/DraggableBlock.tsx
+'use client';
+
+import React from 'react';
+import { motion } from 'framer-motion';
+
+interface DraggableBlockProps {
+  blockNumber: number;
+  dataHex: string;
+  binaryBlock: string;
+  isSelected: boolean;
+  alreadyInCacheLine: number | null;
+  onSelect: () => void;
+}
+
+export default function DraggableBlock({
+  blockNumber,
+  dataHex,
+  binaryBlock,
+  isSelected,
+  alreadyInCacheLine,
+  onSelect,
+}: DraggableBlockProps) {
+  const handleDragStart = (e: React.DragEvent<HTMLDivElement>) => {
+    e.dataTransfer.setData('text/plain', blockNumber.toString());
+    onSelect();
+  };
+
+  return (
+    <motion.div
+      key={blockNumber}
+      initial={{ scale: 0.9, opacity: 0, x: -20 }}
+      animate={{ scale: 1, opacity: 1, x: 0 }}
+      whileHover={{ scale: 1.02 }}
+      whileTap={{ scale: 0.98 }}
+      draggable
+      onDragStart={handleDragStart}
+      onClick={onSelect}
+      className={`cursor-grab active:cursor-grabbing p-5 rounded-xl border-2 transition-all select-none ${
+        isSelected
+          ? 'bg-emerald-950/80 border-emerald-400 shadow-[0_0_30px_rgba(16,185,129,0.4)]'
+          : 'bg-slate-900/90 border-emerald-500/50 hover:border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.15)]'
+      }`}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <span className="px-2 py-0.5 text-[10px] font-extrabold rounded bg-emerald-500 text-slate-950 uppercase">
+          CPU Request
+        </span>
+        <span className="text-xs text-emerald-400 font-bold">
+          MM BLOCK #{blockNumber}
+        </span>
+      </div>
+
+      <div className="my-3 flex items-baseline justify-between">
+        <div>
+          <div className="text-[10px] text-slate-400 uppercase">Block Address</div>
+          <div className="text-3xl font-extrabold text-white tracking-wider">
+            B{blockNumber}
+            <span className="text-sm text-emerald-400 ml-2 font-normal">
+              ({binaryBlock}₂)
+            </span>
+          </div>
+        </div>
+
+        <div className="text-right">
+          <div className="text-[10px] text-slate-400 uppercase">Payload</div>
+          <div className="text-sm font-bold text-cyan-300">{dataHex}</div>
+        </div>
+      </div>
+
+      {alreadyInCacheLine !== null ? (
+        <div className="mt-3 p-2 rounded bg-amber-500/20 border border-amber-400/60 text-amber-200 text-xs font-bold text-center animate-pulse">
+          ⚡ BLOCK IN CACHE! Click Cache Line {alreadyInCacheLine} to trigger a CACHE HIT!
+        </div>
+      ) : (
+        <div className="mt-3 pt-2 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
+          <span>Drag to Cache Line or Click to Route</span>
+          <span className="text-emerald-400 font-bold">&rarr;</span>
+        </div>
+      )}
+    </motion.div>
+  );
+}
