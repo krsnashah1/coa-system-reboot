@@ -1,10 +1,3 @@
-// src/components/ui/TutorialOverlay.tsx
-'use client';
-
-import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { useGameStore } from '@/store/gameStore';
-
 const WALKTHROUGH_STEPS = [
   {
     id: 0,
@@ -14,9 +7,9 @@ const WALKTHROUGH_STEPS = [
     content: (
       <div className="space-y-3 text-sm text-slate-300 leading-relaxed">
         <p className="text-xs md:text-sm">
-          The central processor is stalling because its <strong className="text-emerald-400">Cache Memory</strong> and{' '}
-          <strong className="text-emerald-400">Instruction Pipeline</strong> are desynchronized. Your job is to manually
-          route memory blocks and resolve pipeline hazards.
+          The central processor is stalling because its <strong className="text-emerald-400">Memory Subsystem</strong> and{' '}
+          <strong className="text-emerald-400">Instruction Pipeline</strong> are desynchronized. Complete the 2 Memory
+          levels and the Pipeline Overdrive challenges as fast as possible!
         </p>
         <div className="grid grid-cols-3 gap-2.5 bg-slate-950 p-3 rounded-lg border border-emerald-500/30 text-center">
           <div className="p-2 bg-emerald-950/40 rounded border border-emerald-500/20">
@@ -25,7 +18,7 @@ const WALKTHROUGH_STEPS = [
           </div>
           <div className="p-2 bg-amber-950/40 rounded border border-amber-500/30">
             <div className="text-xs text-amber-300 font-bold">CACHE (SRAM)</div>
-            <div className="text-[10px] text-amber-400 mt-1">Your Workspace!</div>
+            <div className="text-[10px] text-amber-400 mt-1">Fast (~2–25ns)</div>
           </div>
           <div className="p-2 bg-cyan-950/40 rounded border border-cyan-500/20">
             <div className="text-xs text-cyan-300 font-bold">MAIN RAM (DRAM)</div>
@@ -70,23 +63,24 @@ const WALKTHROUGH_STEPS = [
   },
   {
     id: 2,
-    tag: '03 // ASSOCIATIVE',
-    title: 'Levels 2 & 3: Associative & Set-Associative',
-    subtitle: 'Eliminating Thrashing with Flexibility & LRU',
+    tag: '03 // HIERARCHY',
+    title: 'Level 2: Memory Hierarchy Pyramid',
+    subtitle: 'Balancing Speed, Capacity, and Cost Per Bit',
     content: (
       <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
         <div className="p-3 bg-slate-950 rounded border border-cyan-500/30">
-          <h4 className="font-bold text-cyan-300 uppercase">Fully Associative Mapping (Level 2)</h4>
+          <h4 className="font-bold text-cyan-300 uppercase">Top to Bottom Trade-offs</h4>
           <p className="mt-1">
-            Any Main Memory block can go into <strong>ANY empty cache line</strong>! Once all 4 lines are full, you must
-            overwrite the line marked <strong className="text-rose-400">LRU (OLDEST)</strong>.
+            As you move <strong>down</strong> the pyramid (from Level 0 to Level 4), <strong>Capacity increases</strong>{' '}
+            and <strong>Cost per bit decreases</strong>, while <strong>Access Time becomes slower</strong>.
           </p>
         </div>
         <div className="p-3 bg-slate-950 rounded border border-amber-500/30">
-          <h4 className="font-bold text-amber-300 uppercase">2-Way Set-Associative Mapping (Level 3)</h4>
+          <h4 className="font-bold text-amber-300 uppercase">The 5 Hierarchy Levels (L0 &rarr; L4)</h4>
           <p className="mt-1">
-            The 4 lines are split into <strong>2 Sets</strong> (Set 0 = Lines 0,1 | Set 1 = Lines 2,3). First find{' '}
-            <code>Set = Block mod 2</code>, then pick any free line in that Set (or the Set&apos;s LRU line if full)!
+            <strong>L0:</strong> CPU Registers (0.25–0.5ns) &rarr; <strong>L1:</strong> Cache SRAM (0.5–25ns) &rarr;{' '}
+            <strong>L2:</strong> Main Memory DRAM (80–250ns) &rarr; <strong>L3:</strong> Magnetic Disk (~5ms) &rarr;{' '}
+            <strong>L4:</strong> Magnetic Tape (Archival).
           </p>
         </div>
       </div>
@@ -96,190 +90,26 @@ const WALKTHROUGH_STEPS = [
     id: 3,
     tag: '04 // PIPELINE',
     title: 'Phase 2: Instruction Level Pipelining',
-    subtitle: 'Overlapping Fetch, Decode, Execute & Writeback',
+    subtitle: 'Non-Pipelined vs. Pipelined Execution & Hazards',
     content: (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-300">
-        <div className="p-3 bg-rose-950/30 border border-rose-500/40 rounded">
-          <div className="font-bold text-rose-300">1. Data Hazard (RAW)</div>
+        <div className="p-3 bg-cyan-950/30 border border-cyan-500/40 rounded">
+          <div className="font-bold text-cyan-300">1. Non-Pipelined vs. Pipelined</div>
           <p className="mt-1">
-            Instruction 2 reads a memory/register location before Instruction 1 finishes Writing Back (WR).
+            <strong>Non-Pipelined:</strong> I2 starts only after I1 finishes E (<code>Cycles = N × C1</code>).
+            <br />
+            <strong>Pipelined:</strong> Instructions overlap by <code>Δ = max(IF, D, E)</code> (
+            <code>Cycles = C1 + (N - 1) × Δ</code>).
           </p>
-          <div className="mt-2 text-emerald-300 font-bold">Fix: Operand Forwarding / NOP Stall</div>
         </div>
-        <div className="p-3 bg-amber-950/30 border border-amber-500/40 rounded">
-          <div className="font-bold text-amber-300">2. Control &amp; Structural Hazards</div>
+        <div className="p-3 bg-rose-950/30 border border-rose-500/40 rounded">
+          <div className="font-bold text-rose-300">2. Data &amp; Control Hazards</div>
           <p className="mt-1">
-            <code>JMP</code> instructions require flushing wrong-path fetches + Branch Prediction. Slow Execution stages
-            can be split into sub-stages!
+            Use <strong>Operand Forwarding / NOP Bubbles</strong> for Read-After-Write (RAW) Data Hazards, and{' '}
+            <strong>Pipeline Flush + Branch Prediction</strong> for Jump/Branch Control Hazards!
           </p>
         </div>
       </div>
     ),
   },
 ];
-
-export default function TutorialOverlay() {
-  const {
-    isTutorialOpen,
-    tutorialStep,
-    setTutorialStep,
-    closeTutorial,
-    playerName,
-    playerRegNo,
-    hasRegistered,
-    setPlayerInfo,
-  } = useGameStore();
-
-  const [nameInput, setNameInput] = useState(playerName);
-  const [regInput, setRegInput] = useState(playerRegNo);
-  const [nameError, setNameError] = useState(false);
-
-  if (!isTutorialOpen) return null;
-
-  const currentStep = WALKTHROUGH_STEPS[tutorialStep] || WALKTHROUGH_STEPS[0];
-
-  const handleStartOrClose = () => {
-    if (!hasRegistered) {
-      if (!nameInput.trim()) {
-        setNameError(true);
-        return;
-      }
-      setPlayerInfo(nameInput, regInput);
-    }
-    closeTutorial();
-  };
-
-  return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 font-mono"
-      >
-        <motion.div
-          initial={{ scale: 0.94, y: 15 }}
-          animate={{ scale: 1, y: 0 }}
-          exit={{ scale: 0.94, y: 15 }}
-          className="w-full max-w-2xl bg-slate-900 border-2 border-emerald-500/60 rounded-xl shadow-[0_0_50px_rgba(16,185,129,0.25)] overflow-hidden"
-        >
-          {/* Header */}
-          <div className="bg-slate-950 px-5 py-3 border-b border-emerald-500/30 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-xs font-bold tracking-widest text-emerald-400 uppercase">
-                COA FIELD MANUAL &amp; TECHNICIAN LOGIN
-              </span>
-            </div>
-            {hasRegistered && (
-              <button
-                onClick={closeTutorial}
-                className="text-xs text-slate-400 hover:text-rose-400 font-bold px-2 py-0.5 rounded cursor-pointer"
-              >
-                [ESC / RESUME]
-              </button>
-            )}
-          </div>
-
-          {/* Player Registration Bar (Always visible until registered) */}
-          {!hasRegistered && (
-            <div className="bg-emerald-950/30 border-b border-emerald-500/40 px-6 py-4">
-              <div className="text-xs font-bold text-emerald-300 uppercase mb-2">
-                ⚡ STEP 1: IDENTIFY YOURSELF FOR THE LIVE CLASS LEADERBOARD
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <input
-                    type="text"
-                    placeholder="ENTER YOUR NAME / CALLSIGN *"
-                    value={nameInput}
-                    onChange={(e) => {
-                      setNameInput(e.target.value);
-                      setNameError(false);
-                    }}
-                    maxLength={16}
-                    className={`w-full bg-slate-950 border rounded-lg px-3.5 py-2 text-xs text-white focus:outline-none ${
-                      nameError
-                        ? 'border-rose-500 shadow-[0_0_12px_rgba(244,63,94,0.4)]'
-                        : 'border-emerald-500/50 focus:border-emerald-400'
-                    }`}
-                  />
-                  {nameError && (
-                    <span className="text-[10px] text-rose-400 mt-1 block">
-                      Please enter your name/username before starting!
-                    </span>
-                  )}
-                </div>
-                <div>
-                  <input
-                    type="text"
-                    placeholder="REG NO (OPTIONAL, e.g. 24BCE...)"
-                    value={regInput}
-                    onChange={(e) => setRegInput(e.target.value)}
-                    maxLength={12}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3.5 py-2 text-xs text-white focus:outline-none focus:border-emerald-400"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Walkthrough Tabs */}
-          <div className="grid grid-cols-4 border-b border-slate-800 bg-slate-950/50">
-            {WALKTHROUGH_STEPS.map((step, index) => (
-              <button
-                key={step.id}
-                onClick={() => setTutorialStep(index)}
-                className={`py-2.5 px-2 text-[10px] md:text-xs font-bold tracking-wider border-b-2 transition-all cursor-pointer ${
-                  tutorialStep === index
-                    ? 'border-emerald-400 text-emerald-300 bg-emerald-500/10'
-                    : 'border-transparent text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                {step.tag}
-              </button>
-            ))}
-          </div>
-
-          {/* Walkthrough Content */}
-          <div className="p-6 min-h-[250px] flex flex-col justify-between">
-            <div>
-              <h2 className="text-lg font-extrabold text-white">{currentStep.title}</h2>
-              <p className="text-xs text-emerald-400/80 mb-3">{currentStep.subtitle}</p>
-              {currentStep.content}
-            </div>
-
-            {/* Footer Controls */}
-            <div className="mt-6 pt-4 border-t border-slate-800 flex items-center justify-between">
-              <button
-                onClick={() => setTutorialStep(Math.max(0, tutorialStep - 1))}
-                disabled={tutorialStep === 0}
-                className="px-4 py-2 rounded text-xs font-bold border border-slate-700 text-slate-300 disabled:opacity-30 cursor-pointer"
-              >
-                &larr; PREV TAB
-              </button>
-
-              <div className="flex items-center gap-2">
-                {tutorialStep < WALKTHROUGH_STEPS.length - 1 && (
-                  <button
-                    onClick={() => setTutorialStep(tutorialStep + 1)}
-                    className="px-4 py-2 rounded text-xs font-bold bg-slate-800 text-emerald-300 hover:bg-slate-700 cursor-pointer"
-                  >
-                    NEXT TAB &rarr;
-                  </button>
-                )}
-
-                <button
-                  onClick={handleStartOrClose}
-                  className="px-5 py-2 rounded text-xs font-extrabold bg-emerald-500 text-slate-950 hover:bg-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.5)] cursor-pointer"
-                >
-                  {hasRegistered ? 'RESUME GAME →' : 'START REBOOT SEQUENCE →'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
-  );
-}

@@ -15,6 +15,11 @@ import CacheLine from './CacheLine';
 import LiveTelemetryDashboard from '../ui/LiveTelemetryDashboard';
 
 // ============================================================================
+// TOGGLE FLAG: Set to `true` in the future if you ever want Level 3 re-enabled
+// ============================================================================
+const ENABLE_LEVEL_3 = false;
+
+// ============================================================================
 // LEVEL 2 DATA: MEMORY HIERARCHY PYRAMID (From Intro to Memory Org Slides)
 // ============================================================================
 interface HierarchyTier {
@@ -70,7 +75,7 @@ const HIERARCHY_TIERS: HierarchyTier[] = [
 ];
 
 // ============================================================================
-// LEVEL 3 DATA: GATE-STYLE PA BIT-SPLITTER & 3Cs CACHE MISS DECODER
+// PRESERVED LEVEL 3 DATA (DORMANT UNLESS ENABLE_LEVEL_3 === true)
 // ============================================================================
 interface BitSplitChallenge {
   mmSizeLabel: string;
@@ -94,9 +99,9 @@ function generateLevel1Sequence(): number[] {
   const remPool = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
   const bA1 = remPool[0] + 4 * randInt(0, 1);
   const bB1 = remPool[1] + 4 * randInt(0, 2);
-  const bA2 = remPool[0] + 4 * randInt(2, 3); // Collides with bA1 on Line remPool[0]
+  const bA2 = remPool[0] + 4 * randInt(2, 3);
   const bC1 = remPool[2] + 4 * randInt(0, 3);
-  return [bA1, bB1, bA1, bA2, bC1, bA2]; // 6 crisp, fast requests
+  return [bA1, bB1, bA1, bA2, bC1, bA2];
 }
 
 function generateLevel3Challenge(): BitSplitChallenge {
@@ -108,10 +113,10 @@ function generateLevel3Challenge(): BitSplitChallenge {
       ways: 2,
       totalPaBits: 17,
       expectedOffsetBits: 8,
-      numLinesPower: 6, // 2^14 / 2^8 = 2^6
-      numSetsPower: 5, // 2^6 / 2^1 = 2^5 -> 5 Set bits
+      numLinesPower: 6,
+      numSetsPower: 5,
       expectedSetBits: 5,
-      expectedTagBits: 4, // 17 - 5 - 8 = 4 Tag bits
+      expectedTagBits: 4,
     },
     {
       mmSizeLabel: '64 KB (2¹⁶ Bytes)',
@@ -120,10 +125,10 @@ function generateLevel3Challenge(): BitSplitChallenge {
       ways: 2,
       totalPaBits: 16,
       expectedOffsetBits: 6,
-      numLinesPower: 5, // 2^11 / 2^6 = 2^5
-      numSetsPower: 4, // 2^5 / 2^1 = 2^4 -> 4 Set bits
+      numLinesPower: 5,
+      numSetsPower: 4,
       expectedSetBits: 4,
-      expectedTagBits: 6, // 16 - 4 - 6 = 6 Tag bits
+      expectedTagBits: 6,
     },
     {
       mmSizeLabel: '1 MB (2²⁰ Bytes)',
@@ -132,10 +137,10 @@ function generateLevel3Challenge(): BitSplitChallenge {
       ways: 4,
       totalPaBits: 20,
       expectedOffsetBits: 6,
-      numLinesPower: 9, // 2^15 / 2^6 = 2^9
-      numSetsPower: 7, // 2^9 / 2^2 = 2^7 -> 7 Set bits
+      numLinesPower: 9,
+      numSetsPower: 7,
       expectedSetBits: 7,
-      expectedTagBits: 7, // 20 - 7 - 6 = 7 Tag bits
+      expectedTagBits: 7,
     },
   ];
 
@@ -197,13 +202,13 @@ export default function CacheGame() {
   const [isMounted, setIsMounted] = useState(false);
   const [stage, setStage] = useState<1 | 2 | 3>(1);
 
-  // Stage 1 State (Direct Mapping Router)
+  // Level 1 State (Direct Mapping Router)
   const [lvl1Sequence, setLvl1Sequence] = useState<number[]>([]);
   const [stepIdx, setStepIdx] = useState(0);
   const [lines, setLines] = useState<CacheLineState[]>(INITIAL_LINES);
   const [stepCounter, setStepCounter] = useState(1);
 
-  // Stage 2 State (Memory Hierarchy Pyramid Architect)
+  // Level 2 State (Memory Hierarchy Pyramid Architect)
   const [shuffledPool, setShuffledPool] = useState<HierarchyTier[]>([]);
   const [pyramidSlots, setPyramidSlots] = useState<(HierarchyTier | null)[]>([
     null,
@@ -214,7 +219,7 @@ export default function CacheGame() {
   ]);
   const [selectedTier, setSelectedTier] = useState<HierarchyTier | null>(null);
 
-  // Stage 3 State (PA Bit-Splitter & 3Cs Decoder)
+  // Preserved Level 3 State (Dormant unless ENABLE_LEVEL_3 is true)
   const [bitChallenge, setBitChallenge] = useState<BitSplitChallenge | null>(
     null
   );
@@ -230,9 +235,7 @@ export default function CacheGame() {
 
   useEffect(() => {
     setLvl1Sequence(generateLevel1Sequence());
-    setShuffledPool(
-      [...HIERARCHY_TIERS].sort(() => Math.random() - 0.5)
-    );
+    setShuffledPool([...HIERARCHY_TIERS].sort(() => Math.random() - 0.5));
     const ch = generateLevel3Challenge();
     setBitChallenge(ch);
     setUserTagBits(6);
@@ -265,7 +268,7 @@ export default function CacheGame() {
   }
 
   // ==========================================================================
-  // STAGE 1 HANDLER: DIRECT MAPPING BLOCK ROUTING
+  // LEVEL 1 HANDLER: DIRECT MAPPING BLOCK ROUTING
   // ==========================================================================
   const existingHitLine =
     lines.find((l) => l.valid && l.blockNumber === currentBlock)?.lineIndex ??
@@ -327,23 +330,22 @@ export default function CacheGame() {
       setStage(2);
       setBanner(null);
       triggerHint({
-        title: 'STAGE 1 COMPLETE! UNLOCKED: MEMORY HIERARCHY PYRAMID',
+        title: 'LEVEL 1 COMPLETE! UNLOCKED: MEMORY HIERARCHY PYRAMID',
         message:
-          'Now arrange the 5 computer memory technologies from Fastest / Highest Cost-per-Bit (Level 0) to Largest Capacity / Slowest Access (Level 4)!',
+          'Arrange the 5 computer memory technologies from Fastest / Highest Cost-per-Bit (Level 0) to Largest Capacity / Slowest Access (Level 4)!',
         type: 'TACTICAL',
       });
     }
   };
 
   // ==========================================================================
-  // STAGE 2 HANDLER: MEMORY HIERARCHY PYRAMID BUILDER
+  // LEVEL 2 HANDLER: MEMORY HIERARCHY PYRAMID BUILDER
   // ==========================================================================
   const handlePlaceInPyramid = (slotIdx: number, tierToPlace?: HierarchyTier) => {
     const tier = tierToPlace || selectedTier;
     if (!tier) return;
 
     const newSlots = [...pyramidSlots];
-    // If this tier was already in another slot, clear that old slot
     const prevSlotIdx = newSlots.findIndex((s) => s?.id === tier.id);
     if (prevSlotIdx >= 0) newSlots[prevSlotIdx] = null;
 
@@ -382,19 +384,19 @@ export default function CacheGame() {
 
     sound.playHit();
     recordHit();
-    addScore(250);
-    setStage(3);
+    addScore(300);
     setBanner(null);
-    triggerHint({
-      title: 'STAGE 2 COMPLETE! UNLOCKED: PA BIT-SPLITTER & 3Cs DECODER',
-      message:
-        'Configure the hardware address decoder by splitting the Physical Address bits into Tag, Set Index, and Byte Offset!',
-      type: 'TACTICAL',
-    });
+
+    if (ENABLE_LEVEL_3) {
+      setStage(3);
+    } else {
+      // Directly complete Phase 1 after Level 2!
+      completeCachePhase();
+    }
   };
 
   // ==========================================================================
-  // STAGE 3 HANDLER: PHYSICAL ADDRESS BIT-SPLITTER & 3Cs MISS CLASSIFIER
+  // PRESERVED LEVEL 3 HANDLER (DORMANT UNLESS ENABLE_LEVEL_3 === true)
   // ==========================================================================
   const handleVerifyBitSplit = () => {
     const sumBits = userTagBits + userSetBits + userOffsetBits;
@@ -413,7 +415,7 @@ export default function CacheGame() {
       userTagBits !== bitChallenge.expectedTagBits
     ) {
       sound.playFault();
-      const formula = `Offset = log2(${bitChallenge.blockSizeLabel.split(' ')[0]}) = ${bitChallenge.expectedOffsetBits}b | Sets = 2^${bitChallenge.numLinesPower}/2^${Math.log2(bitChallenge.ways)} = 2^${bitChallenge.numSetsPower} -> ${bitChallenge.expectedSetBits}b | Tag = ${bitChallenge.totalPaBits} - ${bitChallenge.expectedSetBits} - ${bitChallenge.expectedOffsetBits} = ${bitChallenge.expectedTagBits}b`;
+      const formula = `Offset = ${bitChallenge.expectedOffsetBits}b | Set = ${bitChallenge.expectedSetBits}b | Tag = ${bitChallenge.expectedTagBits}b`;
       recordMiss(
         `Bit-Split Mismatch! Check your Offset (${bitChallenge.expectedOffsetBits}b), Set Index (${bitChallenge.expectedSetBits}b), and Tag (${bitChallenge.expectedTagBits}b) math.`,
         formula
@@ -444,9 +446,11 @@ export default function CacheGame() {
     completeCachePhase();
   };
 
+  const visibleLevels = ENABLE_LEVEL_3 ? [1, 2, 3] : [1, 2];
+
   return (
     <section className="relative max-w-6xl mx-auto w-full px-4 py-6 font-mono flex flex-col gap-6">
-      {/* Phase 1 Lock Overlay once all 3 stages are completed */}
+      {/* Phase 1 Lock Overlay once both levels are completed */}
       {isCacheCompleted && (
         <div className="fixed inset-0 z-30 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
           <motion.div
@@ -461,8 +465,8 @@ export default function CacheGame() {
               MEMORY SUBSYSTEM ONLINE
             </h2>
             <p className="text-xs md:text-sm text-slate-300 mb-6 leading-relaxed">
-              You have mastered Direct Mapping, the Memory Hierarchy Pyramid, and Set-Associative Physical Address
-              Decoding. Advance to <strong className="text-emerald-400">Phase 2: Instruction Pipeline Overdrive</strong>!
+              You have mastered Direct Mapping and the Memory Hierarchy Architecture. Advance to{' '}
+              <strong className="text-emerald-400">Phase 2: Instruction Pipeline Overdrive</strong>!
             </p>
             <button
               onClick={() => setPhase('PIPELINE')}
@@ -498,7 +502,7 @@ export default function CacheGame() {
           </div>
 
           <div className="flex items-center gap-2">
-            {[1, 2, 3].map((s) => (
+            {visibleLevels.map((s) => (
               <div
                 key={s}
                 className={`px-3 py-1.5 rounded text-xs font-bold border select-none ${
@@ -516,7 +520,7 @@ export default function CacheGame() {
         </div>
 
         {/* ===================================================================
-            STAGE 1: DIRECT MAPPING ROUTER
+            LEVEL 1: DIRECT MAPPING ROUTER
            =================================================================== */}
         {stage === 1 && (
           <>
@@ -604,11 +608,10 @@ export default function CacheGame() {
         )}
 
         {/* ===================================================================
-            STAGE 2: MEMORY HIERARCHY PYRAMID ARCHITECT
+            LEVEL 2: MEMORY HIERARCHY PYRAMID ARCHITECT
            =================================================================== */}
         {stage === 2 && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* LEFT: Scrambled Hardware Modules */}
             <div className="lg:col-span-5 bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-4">
               <div className="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-500/40 text-xs text-emerald-200 leading-relaxed">
                 <strong>📋 HOW TO PLAY LEVEL 2:</strong> Click (or drag) each memory technology below and place it into
@@ -662,7 +665,6 @@ export default function CacheGame() {
               </div>
             </div>
 
-            {/* RIGHT: Visual Pyramid Slots (Level 0 Narrowest -> Level 4 Widest) */}
             <div className="lg:col-span-7 bg-slate-900/80 border border-slate-800 rounded-xl p-5 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-4">
@@ -730,28 +732,21 @@ export default function CacheGame() {
                 onClick={handleVerifyPyramid}
                 className="mt-6 w-full py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs tracking-wider shadow-[0_0_25px_rgba(16,185,129,0.35)] cursor-pointer"
               >
-                VERIFY MEMORY HIERARCHY PYRAMID &rarr;
+                VERIFY MEMORY HIERARCHY &amp; COMPLETE MODULE 5 &rarr;
               </button>
             </div>
           </div>
         )}
 
         {/* ===================================================================
-            STAGE 3: PHYSICAL ADDRESS BIT-SPLITTER & 3Cs MISS DECODER
+            PRESERVED LEVEL 3 JSX (DORMANT UNLESS ENABLE_LEVEL_3 === true)
            =================================================================== */}
-        {stage === 3 && (
+        {ENABLE_LEVEL_3 && stage === 3 && (
           <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-6 space-y-6">
-            {/* Hardware Spec Card */}
             <div className="p-4 rounded-xl bg-emerald-950/30 border border-emerald-500/40">
               <div className="text-xs font-extrabold text-emerald-300 uppercase mb-2">
                 📋 PART A: CONFIGURE THE SET-ASSOCIATIVE ADDRESS DECODER
               </div>
-              <p className="text-xs text-slate-300 mb-3">
-                Given the following computer memory specifications from your COA lecture slides, use the{' '}
-                <span className="text-emerald-300 font-bold">[-] / [+]</span> controls to allocate the exact number of
-                bits for the <strong>TAG</strong>, <strong>SET INDEX</strong>, and <strong>BYTE OFFSET</strong> fields:
-              </p>
-
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center bg-slate-950 p-3 rounded-lg border border-slate-800">
                 <div>
                   <div className="text-[10px] text-slate-400 uppercase">Main Memory Size</div>
@@ -780,181 +775,16 @@ export default function CacheGame() {
               </div>
             </div>
 
-            {/* Interactive Visual Address Bit-Splitter */}
-            <div className="bg-slate-950 p-5 rounded-xl border border-slate-800 space-y-4">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-emerald-400 uppercase">
-                  // {bitChallenge.totalPaBits}-BIT PHYSICAL ADDRESS FORMAT
-                </span>
-                <span
-                  className={`font-extrabold px-2.5 py-0.5 rounded ${
-                    userTagBits + userSetBits + userOffsetBits ===
-                    bitChallenge.totalPaBits
-                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                      : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                  }`}
-                >
-                  Total Allocated: {userTagBits + userSetBits + userOffsetBits} /{' '}
-                  {bitChallenge.totalPaBits} Bits
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* TAG BITS */}
-                <div className="p-4 rounded-xl bg-emerald-950/50 border-2 border-emerald-500/50 text-center">
-                  <div className="text-[10px] text-emerald-400 uppercase font-bold">
-                    1. TAG FIELD BITS
-                  </div>
-                  <div className="text-3xl font-extrabold text-white my-2">
-                    {userTagBits} <span className="text-sm font-normal">bits</span>
-                  </div>
-                  <div className="flex justify-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setUserTagBits(Math.max(1, userTagBits - 1))}
-                      className="px-3 py-1 rounded bg-slate-900 hover:bg-emerald-500 hover:text-slate-950 font-extrabold cursor-pointer"
-                    >
-                      -
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setUserTagBits(Math.min(16, userTagBits + 1))}
-                      className="px-3 py-1 rounded bg-slate-900 hover:bg-emerald-500 hover:text-slate-950 font-extrabold cursor-pointer"
-                    >
-                      +
-                    </button>
-                  </div>
-                  <div className="text-[10px] text-slate-400 mt-2">
-                    PA Bits − Set Bits − Offset Bits
-                  </div>
-                </div>
-
-                {/* SET INDEX BITS */}
-                <div className="p-4 rounded-xl bg-amber-950/50 border-2 border-amber-500/50 text-center">
-                  <div className="text-[10px] text-amber-300 uppercase font-bold">
-                    2. SET INDEX BITS
-                  </div>
-                  <div className="text-3xl font-extrabold text-white my-2">
-                    {userSetBits} <span className="text-sm font-normal">bits</span>
-                  </div>
-                  <div className="flex justify-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setUserSetBits(Math.max(1, userSetBits - 1))}
-                      className="px-3 py-1 rounded bg-slate-900 hover:bg-amber-400 hover:text-slate-950 font-extrabold cursor-pointer"
-                    >
-                      -
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setUserSetBits(Math.min(16, userSetBits + 1))}
-                      className="px-3 py-1 rounded bg-slate-900 hover:bg-amber-400 hover:text-slate-950 font-extrabold cursor-pointer"
-                    >
-                      +
-                    </button>
-                  </div>
-                  <div className="text-[10px] text-slate-400 mt-2">
-                    log₂(Total Cache Lines ÷ {bitChallenge.ways}-Way)
-                  </div>
-                </div>
-
-                {/* WORD / BYTE OFFSET BITS */}
-                <div className="p-4 rounded-xl bg-cyan-950/50 border-2 border-cyan-500/50 text-center">
-                  <div className="text-[10px] text-cyan-300 uppercase font-bold">
-                    3. BLOCK / BYTE OFFSET BITS
-                  </div>
-                  <div className="text-3xl font-extrabold text-white my-2">
-                    {userOffsetBits} <span className="text-sm font-normal">bits</span>
-                  </div>
-                  <div className="flex justify-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setUserOffsetBits(Math.max(1, userOffsetBits - 1))
-                      }
-                      className="px-3 py-1 rounded bg-slate-900 hover:bg-cyan-400 hover:text-slate-950 font-extrabold cursor-pointer"
-                    >
-                      -
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setUserOffsetBits(Math.min(16, userOffsetBits + 1))
-                      }
-                      className="px-3 py-1 rounded bg-slate-900 hover:bg-cyan-400 hover:text-slate-950 font-extrabold cursor-pointer"
-                    >
-                      +
-                    </button>
-                  </div>
-                  <div className="text-[10px] text-slate-400 mt-2">
-                    log₂(Block Size in Bytes)
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Part B: 3Cs Cache Miss Diagnostic */}
-            <div className="bg-slate-950 p-5 rounded-xl border border-slate-800 space-y-3">
-              <div className="text-xs font-extrabold text-amber-300 uppercase">
-                📋 PART B: DIAGNOSE THE CACHE MISS TYPE (THE 3Cs + COHERENCE)
-              </div>
-              <p className="text-xs md:text-sm text-white leading-relaxed">
-                {bitChallenge.missScenarioQuestion}
-              </p>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-                {[
-                  {
-                    id: 'COMPULSORY',
-                    label: 'Compulsory (Cold) Miss',
-                    desc: 'First-ever reference to a memory block',
-                  },
-                  {
-                    id: 'CONFLICT',
-                    label: 'Conflict (Collision) Miss',
-                    desc: 'Multiple blocks map to the same set/line & evict each other',
-                  },
-                  {
-                    id: 'CAPACITY',
-                    label: 'Capacity Miss',
-                    desc: 'Working set exceeds total cache size across all lines',
-                  },
-                  {
-                    id: 'COHERENCE',
-                    label: 'Coherence Miss',
-                    desc: 'Multiprocessor cache invalidation from another core writing shared data',
-                  },
-                ].map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => setSelectedMissType(m.id)}
-                    className={`p-3.5 rounded-xl border-2 text-left transition-all cursor-pointer ${
-                      selectedMissType === m.id
-                        ? 'bg-emerald-500/20 border-emerald-400 text-white shadow-[0_0_15px_rgba(16,185,129,0.3)]'
-                        : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-emerald-500/50'
-                    }`}
-                  >
-                    <div className="text-xs font-extrabold text-emerald-300">
-                      {m.label}
-                    </div>
-                    <div className="text-[11px] text-slate-400 mt-0.5">{m.desc}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
             <button
               type="button"
               onClick={handleVerifyBitSplit}
-              className="w-full py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs tracking-wider shadow-[0_0_25px_rgba(16,185,129,0.35)] cursor-pointer"
+              className="w-full py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs tracking-wider cursor-pointer"
             >
-              VERIFY DECODER BIT-SPLIT &amp; COMPLETE MODULE 5 &rarr;
+              VERIFY DECODER BIT-SPLIT &rarr;
             </button>
           </div>
         )}
 
-        {/* Status / Feedback Banner */}
         {banner && (
           <motion.div
             key={banner.text}
