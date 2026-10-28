@@ -3,7 +3,10 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { useGameStore, CacheMappingMode } from '@/store/gameStore';
+import {
+  useGameStore,
+  CacheLevelScenario,
+} from '@/store/gameStore';
 import {
   CacheLineState,
   getAddressBreakdown,
@@ -14,16 +17,7 @@ import DraggableBlock from './DraggableBlock';
 import CacheLine from './CacheLine';
 import LiveTelemetryDashboard from '../ui/LiveTelemetryDashboard';
 
-interface LevelScenario {
-  level: number;
-  mode: CacheMappingMode;
-  title: string;
-  subtitle: string;
-  sequence: number[];
-  waysPerSet: number;
-}
-
-function generateRandomizedLevels(): LevelScenario[] {
+function generateRandomizedLevels(): CacheLevelScenario[] {
   const randInt = (min: number, max: number) =>
     Math.floor(Math.random() * (max - min + 1)) + min;
 
@@ -67,32 +61,23 @@ function generateRandomizedLevels(): LevelScenario[] {
     {
       level: 2,
       mode: 'ASSOCIATIVE',
-      title: 'LEVEL 02 // FULLY ASSOCIATIVE + LRU (RANDOMIZED)',
+      title: 'LEVEL 02 // FULLY ASSOCIATIVE + LRU (CONTINUOUS CACHE)',
       subtitle:
-        'Place blocks in ANY empty line! When all 4 lines are full, evict the LRU (OLDEST) block.',
+        'Your cache blocks from Level 1 are preserved! Place new blocks in any empty line, or evict the LRU (OLDEST) block.',
       sequence: assocSeq,
       waysPerSet: 4,
     },
     {
       level: 3,
       mode: 'SET_ASSOCIATIVE',
-      title: 'LEVEL 03 // 2-WAY SET-ASSOCIATIVE MAPPING (RANDOMIZED)',
+      title: 'LEVEL 03 // 2-WAY SET-ASSOCIATIVE (CONTINUOUS CACHE)',
       subtitle:
-        '4 Lines divided into 2 Sets (Set = Block mod 2). Fill free ways first, then evict Set LRU!',
+        '4 Lines divided into 2 Sets (Set = Block mod 2). Existing blocks remain active—fill free ways first or evict Set LRU!',
       sequence: setAssocSeq,
       waysPerSet: 2,
     },
   ];
 }
-
-const INITIAL_LINES: CacheLineState[] = [0, 1, 2, 3].map((idx) => ({
-  lineIndex: idx,
-  valid: false,
-  tag: '',
-  blockNumber: null,
-  dataHex: null,
-  lastUsedStep: 0,
-}));
 
 export default function CacheGame() {
   const {
@@ -104,39 +89,36 @@ export default function CacheGame() {
     recordMiss,
     triggerHint,
     setPhase,
+    cacheLevels,
+    cacheLevelIdx,
+    cacheStepIdx,
+    cacheLines,
+    cacheStepCounter,
+    initCacheLevels,
+    setCacheProgress,
   } = useGameStore();
 
   const [isMounted, setIsMounted] = useState(false);
-  const [levels, setLevels] = useState<LevelScenario[]>([]);
-  const [currentLevelIdx, setCurrentLevelIdx] = useState(0);
-  const [stepIdx, setStepIdx] = useState(0);
-  const [lines, setLines] = useState<CacheLineState[]>(INITIAL_LINES);
-  const [stepCounter, setStepCounter] = useState(1);
   const [lastEventBanner, setLastEventBanner] = useState<{
     text: string;
     isError: boolean;
   } | null>(null);
 
-  // Defer random generation to client-side mount to prevent Vercel SSR build error
   useEffect(() => {
-    setLevels(generateRandomizedLevels());
-    setIsMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (isMounted && !isCacheCompleted && currentLevelIdx === 0 && stepIdx === 0) {
-      setLevels(generateRandomizedLevels());
+    if (cacheLevels.length === 0) {
+      initCacheLevels(generateRandomizedLevels());
     }
-  }, [isCacheCompleted, isMounted, currentLevelIdx, stepIdx]);
+    setIsMounted(true);
+  }, [cacheLevels.length, initCacheLevels]);
 
-  const scenario = levels[currentLevelIdx];
-  const currentBlock = scenario?.sequence[stepIdx];
+  const scenario = cacheLevels[cacheLevelIdx];
+  const currentBlock = scenario?.sequence[cacheStepIdx];
 
   useEffect(() => {
     if (scenario) {
       setLevelConfig(scenario.level, scenario.mode, 4, scenario.waysPerSet);
     }
-  }, [currentLevelIdx, scenario, setLevelConfig]);
+  }, [cacheLevelIdx, scenario, setLevelConfig]);
 
   useEffect(() => {
     if (isMounted) {
@@ -148,15 +130,15 @@ export default function CacheGame() {
     (line: CacheLineState): boolean => {
       if (!line.valid || !scenario) return false;
       if (scenario.mode === 'ASSOCIATIVE') {
-        if (lines.some((l) => !l.valid)) return false;
-        const oldest = lines.reduce((min, curr) =>
+        if (cacheLines.some((l) => !l.valid)) return false;
+        const oldest = cacheLines.reduce((min, curr) =>
           curr.lastUsedStep < min.lastUsedStep ? curr : min
         );
         return oldest.lineIndex === line.lineIndex;
       }
       if (scenario.mode === 'SET_ASSOCIATIVE') {
         const targetSet = Math.floor(line.lineIndex / scenario.waysPerSet);
-        const setLines = lines.filter(
+        const setLines = cacheLines.filter(
           (l) => Math.floor(l.lineIndex / scenario.waysPerSet) === targetSet
         );
         if (setLines.some((l) => !l.valid)) return false;
@@ -167,10 +149,10 @@ export default function CacheGame() {
       }
       return false;
     },
-    [lines, scenario]
+    [cacheLines, scenario]
   );
 
-  if (!isMounted || levels.length === 0 || currentBlock === undefined) {
+  if (!isMounted || cacheLevels.length === 0 || currentBlock === undefined) {
     return (
       <div className="flex h-64 items-center justify-center font-mono text-emerald-400 animate-pulse text-xs uppercase tracking-widest">
         INITIALIZING CACHE SUBSYSTEM...
@@ -179,7 +161,8 @@ export default function CacheGame() {
   }
 
   const existingHitLine =
-    lines.find((l) => l.valid && l.blockNumber === currentBlock)?.lineIndex ?? null;
+    cacheLines.find((l) => l.valid && l.blockNumber === currentBlock)?.lineIndex ??
+    null;
 
   const handleDropIntoLine = (targetLineIndex: number) => {
     if (isCacheCompleted || currentBlock === undefined) return;
@@ -187,7 +170,7 @@ export default function CacheGame() {
     const result = validateCachePlacement(
       currentBlock,
       targetLineIndex,
-      lines,
+      cacheLines,
       scenario.mode,
       scenario.waysPerSet
     );
@@ -214,7 +197,8 @@ export default function CacheGame() {
       .toUpperCase()
       .padStart(4, '0')}`;
 
-    const updatedLines = lines.map((l) =>
+    const nextStepCounter = cacheStepCounter + 1;
+    let updatedLines = cacheLines.map((l) =>
       l.lineIndex === targetLineIndex
         ? {
             ...l,
@@ -222,13 +206,11 @@ export default function CacheGame() {
             tag: breakdown.tagBits,
             blockNumber: currentBlock,
             dataHex: hexPayload,
-            lastUsedStep: stepCounter,
+            lastUsedStep: cacheStepCounter,
           }
         : l
     );
 
-    setLines(updatedLines);
-    setStepCounter((c) => c + 1);
     recordHit();
 
     if (result.isCacheHit) {
@@ -253,19 +235,44 @@ export default function CacheGame() {
       });
     }
 
-    if (stepIdx + 1 < scenario.sequence.length) {
-      setStepIdx(stepIdx + 1);
-    } else if (currentLevelIdx + 1 < levels.length) {
-      const nextLvl = levels[currentLevelIdx + 1];
-      setCurrentLevelIdx(currentLevelIdx + 1);
-      setStepIdx(0);
-      setLines(INITIAL_LINES);
+    if (cacheStepIdx + 1 < scenario.sequence.length) {
+      setCacheProgress(
+        cacheLevelIdx,
+        cacheStepIdx + 1,
+        updatedLines,
+        nextStepCounter
+      );
+    } else if (cacheLevelIdx + 1 < cacheLevels.length) {
+      const nextLvl = cacheLevels[cacheLevelIdx + 1];
+
+      // KEEP EXISTING BLOCKS IN THE CACHE! Simply update their Tag bits to match the new mapping mode's bit split!
+      const preservedLines = updatedLines.map((line) => {
+        if (!line.valid || line.blockNumber === null) return line;
+        const newBd = getAddressBreakdown(
+          line.blockNumber,
+          nextLvl.mode,
+          4,
+          nextLvl.waysPerSet
+        );
+        return {
+          ...line,
+          tag: newBd.tagBits,
+        };
+      });
+
+      setCacheProgress(cacheLevelIdx + 1, 0, preservedLines, nextStepCounter);
       triggerHint({
         title: `LEVEL COMPLETE! UNLOCKED: ${nextLvl.title}`,
-        message: nextLvl.subtitle,
+        message: `${nextLvl.subtitle} (Your existing cache blocks have been carried over!)`,
         type: 'TACTICAL',
       });
     } else {
+      setCacheProgress(
+        cacheLevelIdx,
+        cacheStepIdx,
+        updatedLines,
+        nextStepCounter
+      );
       completeCachePhase();
     }
   };
@@ -300,7 +307,11 @@ export default function CacheGame() {
         </div>
       )}
 
-      <div className={`flex flex-col gap-6 transition-all ${isCacheCompleted ? 'opacity-25 pointer-events-none grayscale' : ''}`}>
+      <div
+        className={`flex flex-col gap-6 transition-all ${
+          isCacheCompleted ? 'opacity-25 pointer-events-none grayscale' : ''
+        }`}
+      >
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/80 border border-emerald-500/30 p-4 rounded-xl">
           <div>
             <h1 className="text-base md:text-lg font-extrabold text-white tracking-wide">
@@ -310,9 +321,9 @@ export default function CacheGame() {
           </div>
 
           <div className="flex items-center gap-2">
-            {levels.map((lvl, idx) => {
-              const isCompletedLvl = idx < currentLevelIdx;
-              const isCurrentLvl = idx === currentLevelIdx;
+            {cacheLevels.map((lvl, idx) => {
+              const isCompletedLvl = idx < cacheLevelIdx;
+              const isCurrentLvl = idx === cacheLevelIdx;
               return (
                 <div
                   key={lvl.level}
@@ -340,7 +351,7 @@ export default function CacheGame() {
                 // MAIN MEMORY STREAM
               </span>
               <span className="text-xs text-slate-400">
-                Request {stepIdx + 1} of {scenario.sequence.length}
+                Request {cacheStepIdx + 1} of {scenario.sequence.length}
               </span>
             </div>
 
@@ -366,8 +377,8 @@ export default function CacheGame() {
 
               <div className="grid grid-cols-8 gap-1.5">
                 {scenario.sequence.map((blk, idx) => {
-                  const isPast = idx < stepIdx;
-                  const isCurrent = idx === stepIdx;
+                  const isPast = idx < cacheStepIdx;
+                  const isCurrent = idx === cacheStepIdx;
                   return (
                     <div
                       key={idx}
@@ -390,7 +401,7 @@ export default function CacheGame() {
           <div className="lg:col-span-7 bg-slate-900/70 border border-slate-800 rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
               <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-                // L1 CACHE MEMORY (4 LINES)
+                // L1 CACHE MEMORY (4 LINES — CONTINUOUS STATE)
               </span>
               <span className="text-[11px] text-slate-400">
                 Drag Block B{currentBlock} onto a line (or Click a line)
@@ -398,7 +409,7 @@ export default function CacheGame() {
             </div>
 
             <div className="space-y-3">
-              {lines.map((line) => (
+              {cacheLines.map((line) => (
                 <CacheLine
                   key={line.lineIndex}
                   line={line}

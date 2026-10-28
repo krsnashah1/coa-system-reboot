@@ -1,5 +1,6 @@
 // src/store/gameStore.ts
 import { create } from 'zustand';
+import { CacheLineState } from '@/lib/mapping';
 
 export type GamePhase = 'CACHE' | 'PIPELINE' | 'LEADERBOARD';
 export type CacheMappingMode = 'DIRECT' | 'ASSOCIATIVE' | 'SET_ASSOCIATIVE';
@@ -11,11 +12,33 @@ interface HintData {
   type: 'ERROR' | 'TACTICAL';
 }
 
+export interface CacheLevelScenario {
+  level: number;
+  mode: CacheMappingMode;
+  title: string;
+  subtitle: string;
+  sequence: number[];
+  waysPerSet: number;
+}
+
+const INITIAL_CACHE_LINES: CacheLineState[] = [0, 1, 2, 3].map((idx) => ({
+  lineIndex: idx,
+  valid: false,
+  tag: '',
+  blockNumber: null,
+  dataHex: null,
+  lastUsedStep: 0,
+}));
+
 interface GameState {
   // Player Identity
   playerName: string;
   playerRegNo: string;
   hasRegistered: boolean;
+
+  // Stopwatch / Timer
+  elapsedSeconds: number;
+  isTimerRunning: boolean;
 
   // Progression & Locks
   phase: GamePhase;
@@ -25,6 +48,13 @@ interface GameState {
   mappingMode: CacheMappingMode;
   score: number;
   streak: number;
+
+  // Persistent Cache Progress (So Levels 2 & 3 keep blocks from Level 1!)
+  cacheLevels: CacheLevelScenario[];
+  cacheLevelIdx: number;
+  cacheStepIdx: number;
+  cacheLines: CacheLineState[];
+  cacheStepCounter: number;
 
   // Telemetry Metrics
   hits: number;
@@ -39,16 +69,29 @@ interface GameState {
   // UI Overlays
   isTutorialOpen: boolean;
   tutorialStep: number;
+  isLeaderboardModalOpen: boolean;
   activeHint: HintData | null;
   isGlitching: boolean;
 
   // Actions
   setPlayerInfo: (name: string, regNo: string) => void;
+  tickTimer: () => void;
+  stopTimer: () => void;
   setPhase: (phase: GamePhase) => void;
   completeCachePhase: () => void;
   completePipelinePhase: () => void;
   setLevelConfig: (level: number, mode: CacheMappingMode, lines: number, ways?: number) => void;
   setActiveBlock: (address: number | null) => void;
+
+  // Persistent Cache Actions
+  initCacheLevels: (levels: CacheLevelScenario[]) => void;
+  setCacheProgress: (
+    levelIdx: number,
+    stepIdx: number,
+    lines: CacheLineState[],
+    stepCounter: number
+  ) => void;
+
   addScore: (points: number) => void;
   recordHit: () => void;
   recordMiss: (reason: string, formula?: string) => void;
@@ -57,6 +100,8 @@ interface GameState {
   openTutorial: (step?: number) => void;
   closeTutorial: () => void;
   setTutorialStep: (step: number) => void;
+  openLeaderboardModal: () => void;
+  closeLeaderboardModal: () => void;
   triggerHint: (hint: HintData) => void;
   requestTacticalHint: () => void;
   clearHint: () => void;
@@ -68,6 +113,9 @@ export const useGameStore = create<GameState>((set, get) => ({
   playerRegNo: '',
   hasRegistered: false,
 
+  elapsedSeconds: 0,
+  isTimerRunning: false,
+
   phase: 'CACHE',
   isCacheCompleted: false,
   isPipelineCompleted: false,
@@ -75,6 +123,12 @@ export const useGameStore = create<GameState>((set, get) => ({
   mappingMode: 'DIRECT',
   score: 0,
   streak: 0,
+
+  cacheLevels: [],
+  cacheLevelIdx: 0,
+  cacheStepIdx: 0,
+  cacheLines: INITIAL_CACHE_LINES,
+  cacheStepCounter: 1,
 
   hits: 0,
   misses: 0,
@@ -86,6 +140,7 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   isTutorialOpen: true,
   tutorialStep: 0,
+  isLeaderboardModalOpen: false,
   activeHint: null,
   isGlitching: false,
 
@@ -94,23 +149,41 @@ export const useGameStore = create<GameState>((set, get) => ({
       playerName: name.trim().toUpperCase(),
       playerRegNo: (regNo.trim() || 'VIT-AP').toUpperCase(),
       hasRegistered: true,
+      isTimerRunning: true,
     }),
+
+  tickTimer: () =>
+    set((state) => ({
+      elapsedSeconds: state.isTimerRunning
+        ? state.elapsedSeconds + 1
+        : state.elapsedSeconds,
+    })),
+
+  stopTimer: () => set({ isTimerRunning: false }),
 
   setPhase: (phase) => {
     const { isCacheCompleted, isPipelineCompleted } = get();
-    // Prevent returning to a locked/completed phase
     if (phase === 'CACHE' && isCacheCompleted) return;
     if (phase === 'PIPELINE' && isPipelineCompleted) return;
     set({ phase });
   },
 
   completeCachePhase: () => set({ isCacheCompleted: true }),
-  completePipelinePhase: () => set({ isPipelineCompleted: true }),
+  completePipelinePhase: () =>
+    set({ isPipelineCompleted: true, isTimerRunning: false }),
 
   setLevelConfig: (level, mappingMode, totalCacheLines, waysPerSet = 1) =>
     set({ level, mappingMode, totalCacheLines, waysPerSet }),
 
   setActiveBlock: (address) => set({ activeBlockAddress: address }),
+
+  initCacheLevels: (levels) =>
+    set((state) =>
+      state.cacheLevels.length > 0 ? state : { cacheLevels: levels }
+    ),
+
+  setCacheProgress: (cacheLevelIdx, cacheStepIdx, cacheLines, cacheStepCounter) =>
+    set({ cacheLevelIdx, cacheStepIdx, cacheLines, cacheStepCounter }),
 
   addScore: (points) =>
     set((state) => ({
@@ -151,8 +224,15 @@ export const useGameStore = create<GameState>((set, get) => ({
     })),
 
   openTutorial: (step = 0) => set({ isTutorialOpen: true, tutorialStep: step }),
-  closeTutorial: () => set({ isTutorialOpen: false }),
+  closeTutorial: () =>
+    set((state) => ({
+      isTutorialOpen: false,
+      isTimerRunning: state.hasRegistered && !state.isPipelineCompleted,
+    })),
   setTutorialStep: (step) => set({ tutorialStep: step }),
+
+  openLeaderboardModal: () => set({ isLeaderboardModalOpen: true }),
+  closeLeaderboardModal: () => set({ isLeaderboardModalOpen: false }),
 
   triggerHint: (hint) => set({ activeHint: hint }),
 
@@ -174,10 +254,10 @@ export const useGameStore = create<GameState>((set, get) => ({
       } else if (mappingMode === 'ASSOCIATIVE') {
         set({
           activeHint: {
-            title: 'TACTICAL HINT // FULLY ASSOCIATIVE',
+            title: 'TACTICAL HINT // FULLY ASSOCIATIVE + LRU',
             message:
-              'Place the block in ANY empty cache line (V:0). Once all 4 lines are full, overwrite the line marked "LRU (OLDEST)"!',
-            formula: 'Empty Available -> Any Free Line | Full -> Evict LRU Line',
+              'If the requested block is already in a line, click it for a Hit! Otherwise, use any empty line (V:0), or overwrite the line marked "LRU (OLDEST)"!',
+            formula: 'Hit -> Click Matching Line | Full -> Evict LRU (OLDEST)',
             type: 'TACTICAL',
           },
         });
@@ -188,7 +268,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         set({
           activeHint: {
             title: 'TACTICAL HINT // 2-WAY SET-ASSOCIATIVE',
-            message: `Block #${exampleBlock} maps to Set ${targetSet} (Lines ${targetSet * 2} & ${targetSet * 2 + 1}). Fill empty ways in Set ${targetSet} first, or evict Set ${targetSet}'s LRU line!`,
+            message: `Block #${exampleBlock} maps to Set ${targetSet} (Lines ${targetSet * 2} & ${targetSet * 2 + 1}). Use an empty line in Set ${targetSet} first, or evict Set ${targetSet}'s LRU (OLDEST) line!`,
             formula: `Set = ${exampleBlock} mod ${totalSets} = SET ${targetSet}`,
             type: 'TACTICAL',
           },
@@ -197,10 +277,10 @@ export const useGameStore = create<GameState>((set, get) => ({
     } else {
       set({
         activeHint: {
-          title: 'TACTICAL HINT // PIPELINE TIMING & HAZARDS',
+          title: 'TACTICAL HINT // PIPELINE TIMING METHODS',
           message:
-            'In diagram questions, shift each instruction right until no execution stages (E) overlap in the same column! Then use Total Cycles = First_Instr_Cycles + (N - 1) × Max_Stage_Cycles.',
-          formula: 'Cycles = C1 + (N - 1) × Δ | f_max = f_mc / Δ',
+            'Check the Question Badge! For NON-PIPELINED (Non-Overlapping), I2 starts only AFTER I1 finishes E (Cycles = N × C1). For PIPELINED (Overlapping), I2 starts after Δ = max(IF, D, E) cycles!',
+          formula: 'Non-Pipe = N × C1 | Pipelined = C1 + (N - 1) × Δ',
           type: 'TACTICAL',
         },
       });
@@ -210,7 +290,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   clearHint: () => set({ activeHint: null }),
 
   resetGame: () =>
-    set({
+    set((state) => ({
       score: 0,
       streak: 0,
       hits: 0,
@@ -220,6 +300,13 @@ export const useGameStore = create<GameState>((set, get) => ({
       mappingMode: 'DIRECT',
       isCacheCompleted: false,
       isPipelineCompleted: false,
+      elapsedSeconds: 0,
+      isTimerRunning: state.hasRegistered,
+      cacheLevels: [],
+      cacheLevelIdx: 0,
+      cacheStepIdx: 0,
+      cacheLines: INITIAL_CACHE_LINES,
+      cacheStepCounter: 1,
       activeHint: null,
-    }),
+    })),
 }));

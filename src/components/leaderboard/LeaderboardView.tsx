@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useGameStore } from '@/store/gameStore';
+import { formatTime } from '../ui/TopSystemHUD';
 
 interface LeaderboardEntry {
   id: string;
@@ -12,6 +13,7 @@ interface LeaderboardEntry {
   score: number;
   hitRatio: number;
   cpi: number;
+  timeSeconds: number;
 }
 
 export default function LeaderboardView() {
@@ -22,6 +24,7 @@ export default function LeaderboardView() {
     hits,
     misses,
     cpi,
+    elapsedSeconds,
     setPhase,
     resetGame,
     openTutorial,
@@ -34,9 +37,13 @@ export default function LeaderboardView() {
   const totalAccesses = hits + misses;
   const hitRatio =
     totalAccesses > 0 ? Number(((hits / totalAccesses) * 100).toFixed(1)) : 100;
-  const efficiencyBonus =
+
+  // Accuracy + CPI + Speed Bonus (Faster completion under 8 mins = higher bonus!)
+  const accuracyBonus =
     score > 0 ? Math.round(hitRatio * 2 + Math.max(0, (2.0 - cpi) * 150)) : 0;
-  const finalEfficiencyScore = score + efficiencyBonus;
+  const speedBonus =
+    score > 0 ? Math.max(0, Math.round((480 - elapsedSeconds) * 1.5)) : 0;
+  const finalEfficiencyScore = score + accuracyBonus + speedBonus;
 
   const fetchLeaderboard = useCallback(async () => {
     try {
@@ -60,6 +67,7 @@ export default function LeaderboardView() {
               score: finalEfficiencyScore,
               hitRatio,
               cpi,
+              timeSeconds: elapsedSeconds,
             }),
           });
           const data = await res.json();
@@ -74,12 +82,20 @@ export default function LeaderboardView() {
     submitAndFetch();
     const interval = setInterval(fetchLeaderboard, 4000);
     return () => clearInterval(interval);
-  }, [playerName, playerRegNo, finalEfficiencyScore, hitRatio, cpi, fetchLeaderboard]);
+  }, [
+    playerName,
+    playerRegNo,
+    finalEfficiencyScore,
+    hitRatio,
+    cpi,
+    elapsedSeconds,
+    fetchLeaderboard,
+  ]);
 
   return (
     <section className="max-w-5xl mx-auto w-full px-4 py-8 font-mono flex flex-col gap-6">
       <div className="bg-slate-900/95 border-2 border-emerald-400 rounded-2xl p-6 shadow-[0_0_40px_rgba(16,185,129,0.2)]">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="flex flex-col lg:flex-row items-center justify-between gap-4">
           <div>
             <span className="px-2.5 py-0.5 text-[10px] font-extrabold rounded bg-emerald-400 text-slate-950 uppercase">
               SYSTEM REBOOT COMPLETE // COA SIMULATOR
@@ -89,22 +105,30 @@ export default function LeaderboardView() {
             </h1>
             <p className="text-xs text-emerald-300 mt-1">
               Technician: <strong>{playerName || 'UNREGISTERED'}</strong> ({playerRegNo || 'VIT-AP'})
-              {autoSubmitted && ' — Score Auto-Synced!'}
+              {autoSubmitted && ' — Score & Time Auto-Synced!'}
             </p>
           </div>
 
-          <div className="flex gap-3">
-            <div className="bg-slate-950 p-3 rounded-xl border border-emerald-500/40 text-center min-w-[105px]">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 w-full lg:w-auto">
+            <div className="bg-slate-950 p-3 rounded-xl border border-emerald-500/40 text-center">
               <div className="text-[10px] text-slate-400 uppercase">Hit Ratio</div>
               <div className="text-lg font-extrabold text-emerald-400">{hitRatio}%</div>
             </div>
-            <div className="bg-slate-950 p-3 rounded-xl border border-cyan-500/40 text-center min-w-[105px]">
-              <div className="text-[10px] text-slate-400 uppercase">Final CPI</div>
-              <div className="text-lg font-extrabold text-cyan-300">{cpi.toFixed(2)}</div>
+            <div className="bg-slate-950 p-3 rounded-xl border border-cyan-500/40 text-center">
+              <div className="text-[10px] text-slate-400 uppercase">Completion Time</div>
+              <div className="text-lg font-extrabold text-cyan-300">
+                {formatTime(elapsedSeconds)}
+              </div>
             </div>
-            <div className="bg-slate-950 p-3 rounded-xl border border-amber-400/60 text-center min-w-[125px]">
-              <div className="text-[10px] text-amber-300 uppercase">Total Score</div>
-              <div className="text-xl font-extrabold text-amber-400">{finalEfficiencyScore}</div>
+            <div className="bg-slate-950 p-3 rounded-xl border border-purple-500/40 text-center">
+              <div className="text-[10px] text-slate-400 uppercase">Speed Bonus</div>
+              <div className="text-lg font-extrabold text-purple-300">+{speedBonus}</div>
+            </div>
+            <div className="bg-slate-950 p-3 rounded-xl border border-amber-400/60 text-center">
+              <div className="text-[10px] text-amber-300 uppercase">Final Score</div>
+              <div className="text-xl font-extrabold text-amber-400">
+                {finalEfficiencyScore}
+              </div>
             </div>
           </div>
         </div>
@@ -126,7 +150,7 @@ export default function LeaderboardView() {
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden">
         <div className="px-6 py-3.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
           <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
-            // TOP SYSTEM ARCHITECTS (LIVE FEED)
+            // TOP SYSTEM ARCHITECTS (RANKED BY SCORE &amp; SPEED)
           </span>
           <span className="text-[10px] text-slate-500">AUTO-REFRESH EVERY 4S</span>
         </div>
@@ -169,12 +193,14 @@ export default function LeaderboardView() {
                     <div className="text-[10px] text-slate-500">HIT RATIO</div>
                     <div className="font-bold text-emerald-400">{entry.hitRatio}%</div>
                   </div>
-                  <div className="hidden sm:block text-right">
-                    <div className="text-[10px] text-slate-500">CPI</div>
-                    <div className="font-bold text-cyan-300">{entry.cpi}</div>
+                  <div className="text-right">
+                    <div className="text-[10px] text-slate-500">TIME</div>
+                    <div className="font-bold text-cyan-300">
+                      {formatTime(entry.timeSeconds ?? 0)}
+                    </div>
                   </div>
-                  <div className="text-right min-w-[80px]">
-                    <div className="text-[10px] text-slate-500">SCORE</div>
+                  <div className="text-right min-w-[85px]">
+                    <div className="text-[10px] text-slate-500">FINAL SCORE</div>
                     <div className="text-base font-extrabold text-amber-400">
                       {entry.score}
                     </div>

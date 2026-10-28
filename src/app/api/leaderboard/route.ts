@@ -8,6 +8,7 @@ export interface LeaderboardEntry {
   score: number;
   hitRatio: number;
   cpi: number;
+  timeSeconds: number;
   timestamp: number;
 }
 
@@ -15,15 +16,22 @@ const globalForLeaderboard = globalThis as unknown as {
   coaLeaderboard?: LeaderboardEntry[];
 };
 
-// EDIT THIS ARRAY IF YOU WANT DEFAULT STARTING SCORES, OR LEAVE EMPTY []
 if (!globalForLeaderboard.coaLeaderboard) {
   globalForLeaderboard.coaLeaderboard = [];
+}
+
+function sortLeaderboard(list: LeaderboardEntry[]): LeaderboardEntry[] {
+  return [...list]
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return (a.timeSeconds || 9999) - (b.timeSeconds || 9999);
+    })
+    .slice(0, 30);
 }
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
 
-  // Instant browser reset: visit /api/leaderboard?reset=vitap to clear all scores!
   if (searchParams.get('reset') === 'vitap') {
     globalForLeaderboard.coaLeaderboard = [];
     return NextResponse.json({
@@ -32,21 +40,28 @@ export async function GET(req: Request) {
     });
   }
 
-  const sorted = [...(globalForLeaderboard.coaLeaderboard || [])]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 25);
-
-  return NextResponse.json({ entries: sorted });
+  return NextResponse.json({
+    entries: sortLeaderboard(globalForLeaderboard.coaLeaderboard || []),
+  });
 }
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const name = (body.name || 'TECHNICIAN').toString().trim().toUpperCase().slice(0, 16);
-    const regNo = (body.regNo || 'ECE2002').toString().trim().toUpperCase().slice(0, 12);
+    const name = (body.name || 'TECHNICIAN')
+      .toString()
+      .trim()
+      .toUpperCase()
+      .slice(0, 16);
+    const regNo = (body.regNo || 'ECE2002')
+      .toString()
+      .trim()
+      .toUpperCase()
+      .slice(0, 12);
     const score = Number(body.score) || 0;
     const hitRatio = Number(body.hitRatio) || 0;
     const cpi = Number(body.cpi) || 1.0;
+    const timeSeconds = Number(body.timeSeconds) || 0;
 
     const newEntry: LeaderboardEntry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -55,6 +70,7 @@ export async function POST(req: Request) {
       score,
       hitRatio,
       cpi,
+      timeSeconds,
       timestamp: Date.now(),
     };
 
@@ -64,7 +80,11 @@ export async function POST(req: Request) {
     );
 
     if (existingIdx >= 0) {
-      if (score >= list[existingIdx].score) {
+      const prev = list[existingIdx];
+      if (
+        score > prev.score ||
+        (score === prev.score && timeSeconds < prev.timeSeconds)
+      ) {
         list[existingIdx] = newEntry;
       }
     } else {
@@ -73,8 +93,10 @@ export async function POST(req: Request) {
 
     globalForLeaderboard.coaLeaderboard = list;
 
-    const sorted = [...list].sort((a, b) => b.score - a.score).slice(0, 25);
-    return NextResponse.json({ entries: sorted, submitted: newEntry });
+    return NextResponse.json({
+      entries: sortLeaderboard(list),
+      submitted: newEntry,
+    });
   } catch {
     return NextResponse.json({ error: 'Invalid submission' }, { status: 400 });
   }

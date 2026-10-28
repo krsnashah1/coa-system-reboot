@@ -9,8 +9,10 @@ import { sound } from '@/lib/sound';
 interface DiagramQuestion {
   kind: 'DIAGRAM';
   id: number;
+  executionMode: 'NON_PIPELINED' | 'PIPELINED';
   title: string;
   badge: string;
+  methodBanner: string;
   instructionsText: string;
   ifCycles: number;
   dCycles: number;
@@ -20,9 +22,10 @@ interface DiagramQuestion {
   flushInterval?: number;
   expectedShift: number;
   expectedTotalCycles: number;
-  expectedFmax: string;
+  expectedSecondMetricLabel: string;
+  expectedSecondMetricValue: string;
   cycleChoices: number[];
-  freqChoices: string[];
+  secondMetricChoices: string[];
   formulaNote: string;
 }
 
@@ -67,26 +70,34 @@ function generateRandomizedPipelineQuestions(): PipelineChallenge[] {
   const randPick = <T,>(arr: T[]): T =>
     arr[Math.floor(Math.random() * arr.length)];
 
+  // =========================================================================
+  // QUESTION 1: NON-PIPELINED METHOD (NON-OVERLAPPING SEQUENTIAL EXECUTION)
+  // =========================================================================
   const q1If = randPick([1, 2]);
   const q1D = 1;
-  const q1E = randPick([2, 3, 4]);
-  const q1N = randPick([10, 12, 15, 20]);
-  const q1Fmc = randPick([1, 2, 4]);
-  const q1C1 = q1If + q1D + q1E;
-  const q1Diff = Math.max(q1If, q1D, q1E);
-  const q1Total = q1C1 + (q1N - 1) * q1Diff;
-  const q1Fmax = `${(q1Fmc / q1Diff).toFixed(2)} GHz`;
+  const q1E = randPick([2, 3]);
+  const q1N = randPick([10, 15, 20, 25]);
+  const q1C1 = q1If + q1D + q1E; // Total cycles for 1 instruction (4 or 5)
+  // In Non-Pipelined mode, I2 cannot start until I1 completely finishes all C1 cycles!
+  const q1Shift = q1C1;
+  const q1Total = q1N * q1C1;
 
-  const q2If = 2;
+  // =========================================================================
+  // QUESTION 2: PIPELINED METHOD (OVERLAPPING EXECUTION)
+  // =========================================================================
+  const q2If = randPick([1, 2]);
   const q2D = 1;
-  const q2E = randPick([2, 3]);
-  const q2N = randPick([20, 30, 50, 100]);
-  const q2Fmc = randPick([2, 3, 6]);
+  const q2E = randPick([2, 3, 4]);
+  const q2N = randPick([10, 20, 50, 100]);
+  const q2Fmc = randPick([1, 2, 4]);
   const q2C1 = q2If + q2D + q2E;
   const q2Diff = Math.max(q2If, q2D, q2E);
   const q2Total = q2C1 + (q2N - 1) * q2Diff;
   const q2Fmax = `${(q2Fmc / q2Diff).toFixed(2)} GHz`;
 
+  // =========================================================================
+  // QUESTION 3: PIPELINED METHOD WITH FLUSH INTERVAL
+  // =========================================================================
   const q3If = 1;
   const q3D = 1;
   const q3E = randPick([3, 4]);
@@ -107,34 +118,41 @@ function generateRandomizedPipelineQuestions(): PipelineChallenge[] {
     {
       kind: 'DIAGRAM',
       id: 1,
-      title: 'QUESTION 01 // BUILD PIPELINE TIMING DIAGRAM & CYCLES',
-      badge: 'INTERACTIVE DIAGRAM BUILDER (1 OF 5)',
-      instructionsText: `Given: Fetch (IF) = ${q1If} cycle(s), Decode (D) = ${q1D} cycle(s), Execute (E) = ${q1E} cycle(s), Microcontroller Clock f_mc = ${q1Fmc} GHz, and N = ${q1N} instructions.`,
+      executionMode: 'NON_PIPELINED',
+      title: 'QUESTION 01 // NON-PIPELINED METHOD (NON-OVERLAPPING)',
+      badge: 'DIAGRAM BUILDER (1 OF 5) // NON-PIPELINED MODE',
+      methodBanner:
+        '🚫 REQUIRED METHOD: NON-PIPELINED (NON-OVERLAPPING SEQUENTIAL EXECUTION)',
+      instructionsText: `Use the NON-PIPELINED (Non-Overlapping) Method! Given: Fetch (IF) = ${q1If} cycle(s), Decode (D) = ${q1D} cycle, Execute (E) = ${q1E} cycles, and N = ${q1N} instructions. Each instruction must completely finish Execution (E) before the next instruction starts Fetching (F)!`,
       ifCycles: q1If,
       dCycles: q1D,
       eCycles: q1E,
       totalInstructions: q1N,
-      fmcGHz: q1Fmc,
-      expectedShift: q1Diff,
+      fmcGHz: 1,
+      expectedShift: q1Shift,
       expectedTotalCycles: q1Total,
-      expectedFmax: q1Fmax,
-      cycleChoices: buildChoices(q1Total, q1Diff),
-      freqChoices: Array.from(
+      expectedSecondMetricLabel: '2B. Cycles Required Per Single Instruction (C1 = IF + D + E)',
+      expectedSecondMetricValue: `${q1C1} Cycles / Instruction`,
+      cycleChoices: buildChoices(q1Total, q1C1),
+      secondMetricChoices: Array.from(
         new Set([
-          q1Fmax,
-          `${(q1Fmc / (q1Diff + 1)).toFixed(2)} GHz`,
-          `${q1Fmc.toFixed(2)} GHz`,
-          `${(q1Fmc / (q1C1 || 1)).toFixed(2)} GHz`,
+          `${q1C1} Cycles / Instruction`,
+          `${q1C1 + 1} Cycles / Instruction`,
+          `${Math.max(1, q1C1 - 1)} Cycles / Instruction`,
+          `${q1E} Cycles / Instruction`,
         ])
       ),
-      formulaNote: `Total Cycles = C1 + (N - 1) × Δ = ${q1C1} + (${q1N} - 1) × ${q1Diff} = ${q1Total} Cycles | f_max = ${q1Fmc} GHz / ${q1Diff} = ${q1Fmax}`,
+      formulaNote: `Non-Pipelined Total Cycles = N × (IF + D + E) = ${q1N} × ${q1C1} = ${q1Total} Clock Cycles (Zero Stage Overlap)`,
     },
     {
       kind: 'DIAGRAM',
       id: 2,
-      title: 'QUESTION 02 // HIGH-THROUGHPUT PIPELINE TIMING & SPEEDUP',
-      badge: 'INTERACTIVE DIAGRAM BUILDER (2 OF 5)',
-      instructionsText: `An optimized pipeline has Fetch (IF) = ${q2If} cycles, Decode (D) = ${q2D} cycle, Execute (E) = ${q2E} cycles, Clock f_mc = ${q2Fmc} GHz, and N = ${q2N} instructions.`,
+      executionMode: 'PIPELINED',
+      title: 'QUESTION 02 // PIPELINED METHOD (OVERLAPPING STAGES)',
+      badge: 'DIAGRAM BUILDER (2 OF 5) // PIPELINED MODE',
+      methodBanner:
+        '⚡ REQUIRED METHOD: PIPELINED (OVERLAPPING INSTRUCTION EXECUTION)',
+      instructionsText: `Use the PIPELINED (Overlapping) Method! Given: Fetch (IF) = ${q2If} cycle(s), Decode (D) = ${q2D} cycle, Execute (E) = ${q2E} cycles, Clock f_mc = ${q2Fmc} GHz, and N = ${q2N} instructions. Overlap stages as tightly as possible without same-stage collisions!`,
       ifCycles: q2If,
       dCycles: q2D,
       eCycles: q2E,
@@ -142,24 +160,28 @@ function generateRandomizedPipelineQuestions(): PipelineChallenge[] {
       fmcGHz: q2Fmc,
       expectedShift: q2Diff,
       expectedTotalCycles: q2Total,
-      expectedFmax: q2Fmax,
+      expectedSecondMetricLabel: `2B. Select Max Operating Frequency (f_max = f_mc / Δ)`,
+      expectedSecondMetricValue: q2Fmax,
       cycleChoices: buildChoices(q2Total, q2Diff * 2),
-      freqChoices: Array.from(
+      secondMetricChoices: Array.from(
         new Set([
           q2Fmax,
           `${(q2Fmc / (q2Diff + 1)).toFixed(2)} GHz`,
-          `${(q2Fmc / 4).toFixed(2)} GHz`,
+          `${(q2Fmc / q2C1).toFixed(2)} GHz`,
           `${q2Fmc.toFixed(2)} GHz`,
         ])
       ),
-      formulaNote: `Total Cycles = ${q2C1} + (${q2N} - 1) × ${q2Diff} = ${q2Total} Cycles | f_max = ${q2Fmc} GHz / ${q2Diff} = ${q2Fmax}`,
+      formulaNote: `Pipelined Total Cycles = C1 + (N - 1) × Δ = ${q2C1} + (${q2N} - 1) × ${q2Diff} = ${q2Total} Cycles | f_max = ${q2Fmc} GHz / ${q2Diff} = ${q2Fmax}`,
     },
     {
       kind: 'DIAGRAM',
       id: 3,
-      title: `QUESTION 03 // PIPELINE FLUSH EVERY ${q3FlushK} INSTRUCTIONS`,
-      badge: 'INTERACTIVE DIAGRAM BUILDER (3 OF 5)',
-      instructionsText: `Given: IF = ${q3If} cycle, D = ${q3D} cycle, E = ${q3E} cycles, f_mc = ${q3Fmc} GHz. The pipeline is FLUSHED after every ${q3FlushK} instructions! Find total cycles for N = ${q3N} instructions (${q3Batches} batches of ${q3FlushK}).`,
+      executionMode: 'PIPELINED',
+      title: `QUESTION 03 // PIPELINED METHOD WITH FLUSH EVERY ${q3FlushK} INSTR`,
+      badge: 'DIAGRAM BUILDER (3 OF 5) // PIPELINED FLUSH MODE',
+      methodBanner:
+        '⚡ REQUIRED METHOD: PIPELINED (OVERLAPPING) WITH PERIODIC PIPELINE FLUSH',
+      instructionsText: `Use the PIPELINED (Overlapping) Method! Given: IF = ${q3If} cycle, D = ${q3D} cycle, E = ${q3E} cycles, f_mc = ${q3Fmc} GHz. The pipeline is FLUSHED after every ${q3FlushK} instructions! Find total cycles for N = ${q3N} instructions (${q3Batches} batches of ${q3FlushK}).`,
       ifCycles: q3If,
       dCycles: q3D,
       eCycles: q3E,
@@ -168,9 +190,10 @@ function generateRandomizedPipelineQuestions(): PipelineChallenge[] {
       flushInterval: q3FlushK,
       expectedShift: q3Diff,
       expectedTotalCycles: q3Total,
-      expectedFmax: q3Fmax,
+      expectedSecondMetricLabel: `2B. Select Max Operating Frequency (f_max = f_mc / Δ)`,
+      expectedSecondMetricValue: q3Fmax,
       cycleChoices: buildChoices(q3Total, q3C1),
-      freqChoices: Array.from(
+      secondMetricChoices: Array.from(
         new Set([
           q3Fmax,
           `${(q3Fmc / 2).toFixed(2)} GHz`,
@@ -178,7 +201,7 @@ function generateRandomizedPipelineQuestions(): PipelineChallenge[] {
           `${q3Fmc.toFixed(2)} GHz`,
         ])
       ),
-      formulaNote: `1 Batch (${q3FlushK} instr) = ${q3C1} + (${q3FlushK} - 1) × ${q3Diff} = ${cyclesPerBatch} Cycles. For ${q3Batches} batches: ${q3Batches} × ${cyclesPerBatch} = ${q3Total} Cycles!`,
+      formulaNote: `1 Pipelined Batch (${q3FlushK} instr) = ${q3C1} + (${q3FlushK} - 1) × ${q3Diff} = ${cyclesPerBatch} Cycles. For ${q3Batches} batches: ${q3Batches} × ${cyclesPerBatch} = ${q3Total} Cycles!`,
     },
     {
       kind: 'MCQ',
@@ -204,7 +227,7 @@ function generateRandomizedPipelineQuestions(): PipelineChallenge[] {
           stages: ['  ', '  ', 'IF', 'ID', 'AG', 'OF', 'EX', 'WR'],
         },
       ],
-      problemStatement: `Instruction I2 (MOV ${randReg}, ${randHex}) reaches Operand Fetch (OF) at Cycle 5 before I1 (INC ${randHex}) finishes Writing Back (WR) the updated value to ${randHex} at Cycle 6! What must the pipeline controller do?`,
+      problemStatement: `In an overlapping pipeline, Instruction I2 (MOV ${randReg}, ${randHex}) reaches Operand Fetch (OF) at Cycle 5 before I1 (INC ${randHex}) finishes Writing Back (WR) the updated value to ${randHex} at Cycle 6! What must the pipeline controller do?`,
       coaConceptNote:
         'A Read-After-Write (RAW) Data Dependency Hazard occurs when the destination of I1 is the source operand of I2.',
       options: [
@@ -259,7 +282,7 @@ function generateRandomizedPipelineQuestions(): PipelineChallenge[] {
         },
       ],
       problemStatement:
-        'JMP Down jumps to "Down: DEC CH". However, while JMP Down was being decoded, the pipeline already fetched sequential instructions I2 and I3! How do you resolve this Control Hazard?',
+        'JMP Down jumps to "Down: DEC CH". However, while JMP Down was being decoded, the overlapping pipeline already fetched sequential instructions I2 and I3! How do you resolve this Control Hazard?',
       coaConceptNote:
         'Unconditional/conditional branches break sequential instruction flow, requiring wrong-path instructions to be flushed and Branch Prediction to be used.',
       options: [
@@ -298,7 +321,6 @@ function buildStageArray(ifC: number, dC: number, eC: number): string[] {
 
 export default function PipelineGame() {
   const {
-    cpi,
     updateCPI,
     addScore,
     recordMiss,
@@ -314,7 +336,9 @@ export default function PipelineGame() {
   const [i2Start, setI2Start] = useState<number>(1);
   const [i3Start, setI3Start] = useState<number>(2);
   const [selectedCycles, setSelectedCycles] = useState<number | null>(null);
-  const [selectedFreq, setSelectedFreq] = useState<string | null>(null);
+  const [selectedSecondMetric, setSelectedSecondMetric] = useState<string | null>(
+    null
+  );
 
   const [feedbackBanner, setFeedbackBanner] = useState<{
     text: string;
@@ -322,7 +346,6 @@ export default function PipelineGame() {
     good: boolean;
   } | null>(null);
 
-  // Defer initialization to client mount to avoid Vercel Math.random() error
   useEffect(() => {
     setQuestions(generateRandomizedPipelineQuestions());
     setIsMounted(true);
@@ -341,14 +364,22 @@ export default function PipelineGame() {
     const rowStarts = [0, i2Start, i3Start];
     const collisionCols = new Set<number>();
 
-    for (let col = 0; col < 20; col++) {
+    for (let col = 0; col < 18; col++) {
       const activeStagesInCol: string[] = [];
       for (let r = 0; r < 3; r++) {
         const idxInInstr = col - rowStarts[r];
         if (idxInInstr >= 0 && idxInInstr < stages.length) {
           const st = stages[idxInInstr];
-          if (activeStagesInCol.includes(st)) {
-            collisionCols.add(col);
+          if (currentQ.executionMode === 'NON_PIPELINED') {
+            // In Non-Pipelined mode, ANY two instructions active in the same clock cycle is a violation!
+            if (activeStagesInCol.length > 0) {
+              collisionCols.add(col);
+            }
+          } else {
+            // In Pipelined mode, only SAME-STAGE overlap (F&F, D&D, E&E) is a collision!
+            if (activeStagesInCol.includes(st)) {
+              collisionCols.add(col);
+            }
           }
           activeStagesInCol.push(st);
         }
@@ -380,17 +411,25 @@ export default function PipelineGame() {
 
     if (!diagramValidation.isExactCompactAlignment) {
       sound.playFault();
+      const modeExplanation =
+        currentQ.executionMode === 'NON_PIPELINED'
+          ? `Non-Pipelined (Non-Overlapping) Fault! I2 cannot start until I1 completely finishes all ${currentQ.expectedShift} cycles of IF+D+E!`
+          : `Pipelined Alignment Fault! Shift each instruction by Δ = ${currentQ.expectedShift} clock cycle(s) so hardware stages overlap without colliding!`;
+
       recordMiss(
-        `Diagram Alignment Fault! Each instruction must start Δ = ${currentQ.expectedShift} clock cycle(s) after the previous one so that the ${currentQ.eCycles}-cycle Execute stage never collides!`,
-        `Set I2 Start = Cycle ${1 + currentQ.expectedShift} & I3 Start = Cycle ${1 + currentQ.expectedShift * 2}`
+        modeExplanation,
+        `Set I2 Start = Cycle ${1 + currentQ.expectedShift} & I3 Start = Cycle ${
+          1 + currentQ.expectedShift * 2
+        }`
       );
       setFeedbackBanner({
-        text: `❌ DIAGRAM ALIGNMENT FAULT: Shift I2 to start at Cycle ${
+        text: `❌ DIAGRAM ALIGNMENT FAULT: ${modeExplanation} (Set I2 to start at C${
           1 + currentQ.expectedShift
-        } and I3 to start at Cycle ${
-          1 + currentQ.expectedShift * 2
-        } so stages don't collide in red!`,
-        formula: `Δ = max(${currentQ.ifCycles}, ${currentQ.dCycles}, ${currentQ.eCycles}) = ${currentQ.expectedShift} Cycles between instructions`,
+        } and I3 at C${1 + currentQ.expectedShift * 2})`,
+        formula:
+          currentQ.executionMode === 'NON_PIPELINED'
+            ? `Non-Pipelined Shift = IF + D + E = ${currentQ.expectedShift} Cycles`
+            : `Pipelined Shift Δ = max(${currentQ.ifCycles}, ${currentQ.dCycles}, ${currentQ.eCycles}) = ${currentQ.expectedShift} Cycles`,
         good: false,
       });
       return;
@@ -398,15 +437,15 @@ export default function PipelineGame() {
 
     if (
       selectedCycles !== currentQ.expectedTotalCycles ||
-      selectedFreq !== currentQ.expectedFmax
+      selectedSecondMetric !== currentQ.expectedSecondMetricValue
     ) {
       sound.playFault();
       recordMiss(
-        'Calculation Mismatch! Check the Total Clock Cycles and Max Operating Frequency formulas.',
+        'Calculation Mismatch! Check the formula for the active mode (Non-Pipelined vs. Pipelined).',
         currentQ.formulaNote
       );
       setFeedbackBanner({
-        text: '❌ MATH MISMATCH (-50 PTS): Your diagram is aligned, but your Total Clock Cycles or Max Frequency selection is incorrect!',
+        text: '❌ MATH MISMATCH (-50 PTS): Your diagram is aligned, but one of your selected calculations below is incorrect!',
         formula: currentQ.formulaNote,
         good: false,
       });
@@ -416,7 +455,7 @@ export default function PipelineGame() {
     sound.playHit();
     addScore(300);
     setFeedbackBanner({
-      text: '✅ PERFECT PIPELINE DIAGRAM & TELEMETRY CALCULATION (+300 PTS)!',
+      text: '✅ PERFECT DIAGRAM ALIGNMENT & TELEMETRY CALCULATION (+300 PTS)!',
       formula: currentQ.formulaNote,
       good: true,
     });
@@ -448,7 +487,7 @@ export default function PipelineGame() {
     setI2Start(1);
     setI3Start(2);
     setSelectedCycles(null);
-    setSelectedFreq(null);
+    setSelectedSecondMetric(null);
 
     if (qIdx + 1 < questions.length) {
       setQIdx(qIdx + 1);
@@ -474,8 +513,8 @@ export default function PipelineGame() {
               PIPELINE OVERDRIVE STABILIZED
             </h2>
             <p className="text-xs md:text-sm text-slate-300 mb-6 leading-relaxed">
-              You have completed all Pipeline Diagrams and Hazard Resolutions. Your final system efficiency score has
-              been locked. Proceed to the Live Leaderboard!
+              Your stopwatch has stopped and your final system efficiency rating is locked in. Proceed to the Live
+              Classroom Leaderboard!
             </p>
             <button
               onClick={() => setPhase('LEADERBOARD')}
@@ -487,7 +526,11 @@ export default function PipelineGame() {
         </div>
       )}
 
-      <div className={`flex flex-col gap-6 transition-all ${isPipelineCompleted ? 'opacity-25 pointer-events-none grayscale' : ''}`}>
+      <div
+        className={`flex flex-col gap-6 transition-all ${
+          isPipelineCompleted ? 'opacity-25 pointer-events-none grayscale' : ''
+        }`}
+      >
         {/* Top Progress Bar */}
         <div className="bg-slate-900/90 border border-emerald-500/40 p-4 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
@@ -517,9 +560,20 @@ export default function PipelineGame() {
           </div>
         </div>
 
-        {/* QUESTIONS 1–3: DIAGRAM BUILDER */}
+        {/* QUESTIONS 1–3: DIAGRAM BUILDER (NON-PIPELINED & PIPELINED) */}
         {currentQ.kind === 'DIAGRAM' && diagramValidation && (
           <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-6">
+            {/* Explicit Method Banner (Non-Pipelined vs. Pipelined) */}
+            <div
+              className={`p-3 rounded-xl border-2 text-xs md:text-sm font-extrabold tracking-wide text-center ${
+                currentQ.executionMode === 'NON_PIPELINED'
+                  ? 'bg-amber-950/50 border-amber-400 text-amber-200'
+                  : 'bg-cyan-950/50 border-cyan-400 text-cyan-200'
+              }`}
+            >
+              {currentQ.methodBanner}
+            </div>
+
             <div className="p-4 rounded-xl bg-emerald-950/30 border border-emerald-500/40 space-y-2">
               <div className="text-xs font-extrabold text-emerald-300 uppercase tracking-wider">
                 📋 WHAT YOU NEED TO DO (2 STEPS):
@@ -529,21 +583,29 @@ export default function PipelineGame() {
               </p>
               <ol className="list-decimal list-inside text-xs text-slate-300 space-y-1">
                 <li>
-                  <strong>Step 1 (Build the Diagram):</strong> Use the{' '}
+                  <strong>Step 1 (Align Diagram):</strong> Use the{' '}
                   <span className="text-emerald-300 font-bold">[◀] / [▶]</span>{' '}
-                  buttons to shift <strong>I2</strong> and <strong>I3</strong> so no hardware stages collide in red!
+                  buttons (or click a cycle column) to position <strong>I2</strong> and <strong>I3</strong> according to
+                  the{' '}
+                  <strong className="text-amber-300">
+                    {currentQ.executionMode === 'NON_PIPELINED'
+                      ? 'NON-PIPELINED (Non-Overlapping)'
+                      : 'PIPELINED (Overlapping)'}
+                  </strong>{' '}
+                  rule until the status badge turns green!
                 </li>
                 <li>
-                  <strong>Step 2 (Calculate):</strong> Select the correct{' '}
-                  <strong>Total Clock Cycles</strong> and <strong>Max Operating Frequency (f_max)</strong> below.
+                  <strong>Step 2 (Calculate):</strong> Select the correct answers in <strong>2A</strong> and{' '}
+                  <strong>2B</strong> below, then click <strong>VERIFY</strong>.
                 </li>
               </ol>
             </div>
 
+            {/* Interactive 16-Cycle Timing Grid */}
             <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 overflow-x-auto">
-              <div className="flex items-center justify-between mb-3 min-w-[720px]">
+              <div className="flex items-center justify-between mb-3 min-w-[740px]">
                 <span className="text-xs font-bold text-emerald-400 uppercase">
-                  // INTERACTIVE PIPELINE TIMING DIAGRAM (CLOCK CYCLES 1–16)
+                  // INTERACTIVE TIMING DIAGRAM ({currentQ.executionMode} METHOD)
                 </span>
                 <span
                   className={`text-xs font-extrabold px-2.5 py-1 rounded ${
@@ -553,12 +615,14 @@ export default function PipelineGame() {
                   }`}
                 >
                   {diagramValidation.isExactCompactAlignment
-                    ? '✓ VALID PIPELINE ALIGNMENT (ZERO COLLISIONS)'
-                    : '⚠️ SHIFT I2 & I3 UNTIL RED COLLISIONS CLEAR'}
+                    ? `✓ VALID ${currentQ.executionMode} ALIGNMENT`
+                    : currentQ.executionMode === 'NON_PIPELINED'
+                    ? '⚠️ NON-PIPELINED MODE: SHIFT I2 & I3 SO NO INSTRUCTIONS OVERLAP!'
+                    : '⚠️ PIPELINED MODE: SHIFT I2 & I3 SO SAME STAGES DO NOT COLLIDE!'}
                 </span>
               </div>
 
-              <div className="min-w-[720px] space-y-2">
+              <div className="min-w-[740px] space-y-2">
                 <div className="grid grid-cols-20 gap-1 text-[10px] text-slate-400 font-bold text-center">
                   <div className="col-span-4 text-left pl-2">INSTRUCTION</div>
                   {Array.from({ length: 16 }, (_, c) => (
@@ -579,7 +643,7 @@ export default function PipelineGame() {
                   { label: 'I1 (Fixed)', start: 0, setStart: null },
                   { label: 'I2 (Shiftable)', start: i2Start, setStart: setI2Start },
                   { label: 'I3 (Shiftable)', start: i3Start, setStart: setI3Start },
-                ].map((row, rIdx) => (
+                ].map((row) => (
                   <div key={row.label} className="grid grid-cols-20 gap-1 items-center">
                     <div className="col-span-4 flex items-center justify-between bg-slate-900 px-2.5 py-1.5 rounded border border-slate-800 text-xs">
                       <span className="font-bold text-white">{row.label}</span>
@@ -594,7 +658,7 @@ export default function PipelineGame() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => row.setStart!(Math.min(10, row.start + 1))}
+                            onClick={() => row.setStart!(Math.min(12, row.start + 1))}
                             className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 font-extrabold text-[10px] cursor-pointer"
                           >
                             ▶
@@ -620,7 +684,7 @@ export default function PipelineGame() {
                         <div
                           key={col}
                           onClick={() => {
-                            if (row.setStart && col >= 1 && col <= 10) row.setStart(col);
+                            if (row.setStart && col >= 1 && col <= 12) row.setStart(col);
                           }}
                           className={`h-9 rounded flex items-center justify-center text-xs font-extrabold border transition-all ${
                             row.setStart ? 'cursor-pointer' : ''
@@ -648,9 +712,14 @@ export default function PipelineGame() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
               <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
                 <div className="text-xs font-bold text-emerald-400 uppercase mb-1">
-                  2A. Select Total Clock Cycles
+                  2A. Select Total Clock Cycles ({currentQ.executionMode} Method)
                 </div>
-                <div className="grid grid-cols-2 gap-2.5 mt-3">
+                <p className="text-[11px] text-slate-400 mb-3">
+                  {currentQ.executionMode === 'NON_PIPELINED'
+                    ? `Non-Pipelined Formula: Total Cycles = N (${currentQ.totalInstructions}) × (IF + D + E)`
+                    : 'Pipelined Formula: Total Cycles = C1 + (N - 1) × Δ'}
+                </p>
+                <div className="grid grid-cols-2 gap-2.5">
                   {currentQ.cycleChoices.map((cyc) => (
                     <button
                       key={cyc}
@@ -670,21 +739,26 @@ export default function PipelineGame() {
 
               <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
                 <div className="text-xs font-bold text-amber-300 uppercase mb-1">
-                  2B. Select Max Frequency (f_max)
+                  {currentQ.expectedSecondMetricLabel}
                 </div>
-                <div className="grid grid-cols-2 gap-2.5 mt-3">
-                  {currentQ.freqChoices.map((freq) => (
+                <p className="text-[11px] text-slate-400 mb-3">
+                  {currentQ.executionMode === 'NON_PIPELINED'
+                    ? 'Sum the Fetch, Decode, and Execute clock cycles for a single instruction.'
+                    : `Divide Microcontroller Clock (${currentQ.fmcGHz} GHz) by max stage cycles Δ.`}
+                </p>
+                <div className="grid grid-cols-2 gap-2.5">
+                  {currentQ.secondMetricChoices.map((val) => (
                     <button
-                      key={freq}
+                      key={val}
                       type="button"
-                      onClick={() => setSelectedFreq(freq)}
+                      onClick={() => setSelectedSecondMetric(val)}
                       className={`py-2.5 px-3 rounded-lg text-xs font-extrabold border transition-all cursor-pointer ${
-                        selectedFreq === freq
+                        selectedSecondMetric === val
                           ? 'bg-amber-400 text-slate-950 border-amber-200 shadow-[0_0_15px_rgba(251,191,36,0.4)]'
                           : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-amber-400/50'
                       }`}
                     >
-                      {freq}
+                      {val}
                     </button>
                   ))}
                 </div>
@@ -707,7 +781,8 @@ export default function PipelineGame() {
         {currentQ.kind === 'MCQ' && (
           <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-5">
             <div className="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-500/40 text-xs text-emerald-200">
-              <strong>📋 WHAT YOU NEED TO DO:</strong> Inspect the pipeline diagram below, identify the red <span className="text-rose-400 font-bold">⚠️ HAZARD</span>, and select the correct architectural solution!
+              <strong>📋 WHAT YOU NEED TO DO:</strong> Inspect the overlapping pipeline diagram below, identify the red{' '}
+              <span className="text-rose-400 font-bold">⚠️ HAZARD</span>, and select the correct architectural solution!
             </div>
 
             <div className="space-y-2.5 bg-slate-950 p-4 rounded-xl border border-slate-800 overflow-x-auto">
