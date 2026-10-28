@@ -1,7 +1,7 @@
 // src/components/pipeline/PipelineGame.tsx
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useGameStore } from '@/store/gameStore';
 import { sound } from '@/lib/sound';
@@ -17,7 +17,7 @@ interface DiagramQuestion {
   eCycles: number;
   totalInstructions: number;
   fmcGHz: number;
-  flushInterval?: number; // Used in Question 3 (Pipeline Flush problem)
+  flushInterval?: number;
   expectedShift: number;
   expectedTotalCycles: number;
   expectedFmax: string;
@@ -63,14 +63,10 @@ function buildChoices(correct: number, step: number): number[] {
   return Array.from(set).sort((a, b) => a - b);
 }
 
-/**
- * Generates 5 randomized Pipeline questions (3 Interactive Diagram + Math, 2 Hazard MCQs)
- */
 function generateRandomizedPipelineQuestions(): PipelineChallenge[] {
   const randPick = <T,>(arr: T[]): T =>
     arr[Math.floor(Math.random() * arr.length)];
 
-  // QUESTION 1: Standard Multi-Cycle Pipeline Diagram & Clock Cycle Calculation
   const q1If = randPick([1, 2]);
   const q1D = 1;
   const q1E = randPick([2, 3, 4]);
@@ -81,10 +77,9 @@ function generateRandomizedPipelineQuestions(): PipelineChallenge[] {
   const q1Total = q1C1 + (q1N - 1) * q1Diff;
   const q1Fmax = `${(q1Fmc / q1Diff).toFixed(2)} GHz`;
 
-  // QUESTION 2: Sub-Stage Partitioned Pipeline (Model-4 Improvement)
   const q2If = 2;
   const q2D = 1;
-  const q2E = randPick([2, 3]); // After splitting a 4 or 6 cycle stage in half!
+  const q2E = randPick([2, 3]);
   const q2N = randPick([20, 30, 50, 100]);
   const q2Fmc = randPick([2, 3, 6]);
   const q2C1 = q2If + q2D + q2E;
@@ -92,7 +87,6 @@ function generateRandomizedPipelineQuestions(): PipelineChallenge[] {
   const q2Total = q2C1 + (q2N - 1) * q2Diff;
   const q2Fmax = `${(q2Fmc / q2Diff).toFixed(2)} GHz`;
 
-  // QUESTION 3: Pipeline Flush Interval Problem (Model-3 Problem)
   const q3If = 1;
   const q3D = 1;
   const q3E = randPick([3, 4]);
@@ -106,7 +100,6 @@ function generateRandomizedPipelineQuestions(): PipelineChallenge[] {
   const q3Total = cyclesPerBatch * q3Batches;
   const q3Fmax = `${(q3Fmc / q3Diff).toFixed(2)} GHz`;
 
-  // Random hex address for MCQ 4
   const randHex = randPick(['[2050H]', '[4000H]', '[8A00H]', '[3F10H]']);
   const randReg = randPick(['BL', 'CL', 'DL']);
 
@@ -314,13 +307,10 @@ export default function PipelineGame() {
     completePipelinePhase,
   } = useGameStore();
 
-  const [questions] = useState<PipelineChallenge[]>(() =>
-    generateRandomizedPipelineQuestions()
-  );
+  const [isMounted, setIsMounted] = useState(false);
+  const [questions, setQuestions] = useState<PipelineChallenge[]>([]);
   const [qIdx, setQIdx] = useState(0);
 
-  // Interactive Diagram Builder state for Questions 1–3
-  // I1 always starts at Cycle 0 (1-indexed Cycle 1). Player controls start cycle of I2 and I3!
   const [i2Start, setI2Start] = useState<number>(1);
   const [i3Start, setI3Start] = useState<number>(2);
   const [selectedCycles, setSelectedCycles] = useState<number | null>(null);
@@ -332,11 +322,16 @@ export default function PipelineGame() {
     good: boolean;
   } | null>(null);
 
+  // Defer initialization to client mount to avoid Vercel Math.random() error
+  useEffect(() => {
+    setQuestions(generateRandomizedPipelineQuestions());
+    setIsMounted(true);
+  }, []);
+
   const currentQ = questions[qIdx];
 
-  // Check if the player's interactive diagram alignment has any stage collisions!
   const diagramValidation = useMemo(() => {
-    if (currentQ.kind !== 'DIAGRAM') return null;
+    if (!currentQ || currentQ.kind !== 'DIAGRAM') return null;
     const stages = buildStageArray(
       currentQ.ifCycles,
       currentQ.dCycles,
@@ -346,7 +341,6 @@ export default function PipelineGame() {
     const rowStarts = [0, i2Start, i3Start];
     const collisionCols = new Set<number>();
 
-    // Check every clock cycle column (0..19) for same-stage hardware resource collision (F vs F, D vs D, E vs E)
     for (let col = 0; col < 20; col++) {
       const activeStagesInCol: string[] = [];
       for (let r = 0; r < 3; r++) {
@@ -373,13 +367,21 @@ export default function PipelineGame() {
     };
   }, [currentQ, i2Start, i3Start]);
 
+  if (!isMounted || questions.length === 0 || !currentQ) {
+    return (
+      <div className="flex h-64 items-center justify-center font-mono text-emerald-400 animate-pulse text-xs uppercase tracking-widest">
+        INITIALIZING PIPELINE OVERDRIVE...
+      </div>
+    );
+  }
+
   const handleVerifyDiagramQuestion = () => {
     if (currentQ.kind !== 'DIAGRAM' || !diagramValidation) return;
 
     if (!diagramValidation.isExactCompactAlignment) {
       sound.playFault();
       recordMiss(
-        `Diagram Alignment Fault! Each instruction must start Δ = ${currentQ.expectedShift} clock cycle(s) after the previous one so that the ${currentQ.eCycles}-cycle Execute stage never collides without wasting idle cycles!`,
+        `Diagram Alignment Fault! Each instruction must start Δ = ${currentQ.expectedShift} clock cycle(s) after the previous one so that the ${currentQ.eCycles}-cycle Execute stage never collides!`,
         `Set I2 Start = Cycle ${1 + currentQ.expectedShift} & I3 Start = Cycle ${1 + currentQ.expectedShift * 2}`
       );
       setFeedbackBanner({
@@ -457,358 +459,347 @@ export default function PipelineGame() {
   };
 
   return (
-    <section className="max-w-6xl mx-auto w-full px-4 py-6 font-mono flex flex-col gap-6">
-      {/* Top Progress Bar */}
-      <div className="bg-slate-900/90 border border-emerald-500/40 p-4 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded bg-emerald-500 text-slate-950 uppercase">
-            {currentQ.badge}
-          </span>
-          <h1 className="text-lg md:text-xl font-extrabold text-white mt-1">
-            {currentQ.title}
-          </h1>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {questions.map((q, idx) => (
-            <div
-              key={q.id}
-              className={`px-3 py-1.5 rounded text-xs font-bold border ${
-                idx === qIdx
-                  ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-extrabold'
-                  : idx < qIdx
-                  ? 'bg-slate-900 text-emerald-400 border-emerald-500/30'
-                  : 'bg-slate-950 text-slate-500 border-slate-800'
-              }`}
-            >
-              {idx < qIdx ? '✓' : `Q${idx + 1}`}
+    <section className="relative max-w-6xl mx-auto w-full px-4 py-6 font-mono flex flex-col gap-6">
+      {isPipelineCompleted && (
+        <div className="fixed inset-0 z-30 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="max-w-xl w-full p-8 bg-slate-900 border-2 border-amber-400 rounded-2xl text-center shadow-[0_0_60px_rgba(251,191,36,0.35)]"
+          >
+            <div className="inline-block px-3 py-1 rounded bg-amber-500/20 border border-amber-400 text-amber-300 text-xs font-extrabold uppercase mb-3">
+              🔒 PHASE 2 LOCKED &amp; COMPLETED
             </div>
-          ))}
-        </div>
-      </div>
-
-      {/* =====================================================================
-          QUESTIONS 1–3: INTERACTIVE PIPELINE DIAGRAM BUILDER + MATH
-         ===================================================================== */}
-      {currentQ.kind === 'DIAGRAM' && diagramValidation && (
-        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-6">
-          {/* Clear How-To-Play Instructions Box */}
-          <div className="p-4 rounded-xl bg-emerald-950/30 border border-emerald-500/40 space-y-2">
-            <div className="text-xs font-extrabold text-emerald-300 uppercase tracking-wider">
-              📋 WHAT YOU NEED TO DO (2 STEPS):
-            </div>
-            <p className="text-xs md:text-sm text-white font-bold">
-              {currentQ.instructionsText}
+            <h2 className="text-2xl md:text-3xl font-extrabold text-white mb-3">
+              PIPELINE OVERDRIVE STABILIZED
+            </h2>
+            <p className="text-xs md:text-sm text-slate-300 mb-6 leading-relaxed">
+              You have completed all Pipeline Diagrams and Hazard Resolutions. Your final system efficiency score has
+              been locked. Proceed to the Live Leaderboard!
             </p>
-            <ol className="list-decimal list-inside text-xs text-slate-300 space-y-1">
-              <li>
-                <strong>Step 1 (Build the Diagram):</strong> Use the{' '}
-                <span className="text-emerald-300 font-bold">[◀ LEFT] / [RIGHT ▶]</span>{' '}
-                buttons (or click a cycle column) to shift <strong>Instruction 2 (I2)</strong> and{' '}
-                <strong>Instruction 3 (I3)</strong> so no hardware stages collide in red!
-              </li>
-              <li>
-                <strong>Step 2 (Calculate Telemetry):</strong> Select the correct{' '}
-                <strong>Total Clock Cycles</strong> for all {currentQ.totalInstructions}{' '}
-                instructions and the <strong>Max Operating Frequency (f_max)</strong> below, then click{' '}
-                <strong>VERIFY &amp; LOCK IN</strong>.
-              </li>
-            </ol>
-          </div>
-
-          {/* Interactive Pipeline Timing Grid */}
-          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 overflow-x-auto">
-            <div className="flex items-center justify-between mb-3 min-w-[720px]">
-              <span className="text-xs font-bold text-emerald-400 uppercase">
-                // INTERACTIVE PIPELINE TIMING DIAGRAM (CLOCK CYCLES 1–16)
-              </span>
-              <span
-                className={`text-xs font-extrabold px-2.5 py-1 rounded ${
-                  diagramValidation.isExactCompactAlignment
-                    ? 'bg-emerald-500/20 border border-emerald-400 text-emerald-300'
-                    : 'bg-rose-500/20 border border-rose-500 text-rose-300'
-                }`}
-              >
-                {diagramValidation.isExactCompactAlignment
-                  ? '✓ VALID PIPELINE ALIGNMENT (ZERO COLLISIONS)'
-                  : '⚠️ ALIGNMENT NEEDED: SHIFT I2 & I3 UNTIL RED COLLISIONS CLEAR'}
-              </span>
-            </div>
-
-            <div className="min-w-[720px] space-y-2">
-              {/* Clock Cycle Header Row */}
-              <div className="grid grid-cols-20 gap-1 text-[10px] text-slate-400 font-bold text-center">
-                <div className="col-span-4 text-left pl-2">INSTRUCTION</div>
-                {Array.from({ length: 16 }, (_, c) => (
-                  <div
-                    key={c}
-                    className={`py-1 rounded ${
-                      diagramValidation.collisionCols.has(c)
-                        ? 'bg-rose-500 text-slate-950 font-extrabold'
-                        : 'bg-slate-900'
-                    }`}
-                  >
-                    C{c + 1}
-                  </div>
-                ))}
-              </div>
-
-              {/* Rows for I1, I2, I3 */}
-              {[
-                { label: 'I1 (Fixed)', start: 0, setStart: null },
-                { label: 'I2 (Shiftable)', start: i2Start, setStart: setI2Start },
-                { label: 'I3 (Shiftable)', start: i3Start, setStart: setI3Start },
-              ].map((row, rIdx) => (
-                <div
-                  key={row.label}
-                  className="grid grid-cols-20 gap-1 items-center"
-                >
-                  {/* Row Control Header */}
-                  <div className="col-span-4 flex items-center justify-between bg-slate-900 px-2.5 py-1.5 rounded border border-slate-800 text-xs">
-                    <span className="font-bold text-white">{row.label}</span>
-                    {row.setStart ? (
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => row.setStart!(Math.max(1, row.start - 1))}
-                          className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 font-extrabold text-[10px] cursor-pointer"
-                          title="Shift Left 1 Cycle"
-                        >
-                          ◀
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => row.setStart!(Math.min(10, row.start + 1))}
-                          className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 font-extrabold text-[10px] cursor-pointer"
-                          title="Shift Right 1 Cycle"
-                        >
-                          ▶
-                        </button>
-                      </div>
-                    ) : (
-                      <span className="text-[10px] text-emerald-400">Start: C1</span>
-                    )}
-                  </div>
-
-                  {/* 16 Clock Cycle Cells */}
-                  {Array.from({ length: 16 }, (_, col) => {
-                    const stageOffset = col - row.start;
-                    const stageLetter =
-                      stageOffset >= 0 &&
-                      stageOffset < diagramValidation.stages.length
-                        ? diagramValidation.stages[stageOffset]
-                        : null;
-                    const isCollision =
-                      stageLetter !== null &&
-                      diagramValidation.collisionCols.has(col);
-
-                    return (
-                      <div
-                        key={col}
-                        onClick={() => {
-                          if (row.setStart && col >= 1 && col <= 10) {
-                            row.setStart(col);
-                          }
-                        }}
-                        className={`h-9 rounded flex items-center justify-center text-xs font-extrabold border transition-all ${
-                          row.setStart ? 'cursor-pointer' : ''
-                        } ${
-                          stageLetter === null
-                            ? 'bg-slate-950/60 border-slate-900 text-slate-700 hover:border-slate-700'
-                            : isCollision
-                            ? 'bg-rose-950 border-rose-500 text-rose-300 animate-pulse'
-                            : stageLetter === 'F'
-                            ? 'bg-cyan-950/80 border-cyan-500/60 text-cyan-300'
-                            : stageLetter === 'D'
-                            ? 'bg-amber-950/80 border-amber-500/60 text-amber-300'
-                            : 'bg-emerald-950/80 border-emerald-500/60 text-emerald-300'
-                        }`}
-                      >
-                        {stageLetter || '·'}
-                      </div>
-                    );
-                  })}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Step 2: Calculation Selectors */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-            {/* Total Clock Cycles Selector */}
-            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-              <div className="text-xs font-bold text-emerald-400 uppercase mb-1">
-                2A. Select Total Clock Cycles (for N = {currentQ.totalInstructions} Instructions)
-              </div>
-              <p className="text-[11px] text-slate-400 mb-3">
-                {currentQ.flushInterval
-                  ? `Hint: Calculate cycles for 1 batch of ${currentQ.flushInterval} instructions, then multiply by number of batches!`
-                  : 'Hint: Total Cycles = (Cycles for 1st Instruction) + (N - 1) × (Cycle shift Δ between instructions)'}
-              </p>
-              <div className="grid grid-cols-2 gap-2.5">
-                {currentQ.cycleChoices.map((cyc) => (
-                  <button
-                    key={cyc}
-                    type="button"
-                    onClick={() => setSelectedCycles(cyc)}
-                    className={`py-2.5 px-3 rounded-lg text-xs font-extrabold border transition-all cursor-pointer ${
-                      selectedCycles === cyc
-                        ? 'bg-emerald-500 text-slate-950 border-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.4)]'
-                        : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-emerald-500/50'
-                    }`}
-                  >
-                    {cyc} Clock Cycles
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Max Operating Frequency Selector */}
-            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-              <div className="text-xs font-bold text-amber-300 uppercase mb-1">
-                2B. Select Max Operating Frequency (f_max)
-              </div>
-              <p className="text-[11px] text-slate-400 mb-3">
-                Hint: f_max = f_mc ({currentQ.fmcGHz} GHz) ÷ (Max cycle difference Δ between two instructions)
-              </p>
-              <div className="grid grid-cols-2 gap-2.5">
-                {currentQ.freqChoices.map((freq) => (
-                  <button
-                    key={freq}
-                    type="button"
-                    onClick={() => setSelectedFreq(freq)}
-                    className={`py-2.5 px-3 rounded-lg text-xs font-extrabold border transition-all cursor-pointer ${
-                      selectedFreq === freq
-                        ? 'bg-amber-400 text-slate-950 border-amber-200 shadow-[0_0_15px_rgba(251,191,36,0.4)]'
-                        : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-amber-400/50'
-                    }`}
-                  >
-                    {freq}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Verify Button */}
-          {!feedbackBanner?.good && (
             <button
-              type="button"
-              onClick={handleVerifyDiagramQuestion}
-              className="w-full py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs tracking-wider shadow-[0_0_25px_rgba(16,185,129,0.35)] cursor-pointer"
+              onClick={() => setPhase('LEADERBOARD')}
+              className="w-full py-3.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 text-sm font-extrabold tracking-wider shadow-[0_0_25px_rgba(251,191,36,0.5)] cursor-pointer transition-all"
             >
-              VERIFY DIAGRAM ALIGNMENT &amp; CALCULATIONS &rarr;
+              VIEW LIVE LEADERBOARD &rarr;
             </button>
-          )}
+          </motion.div>
         </div>
       )}
 
-      {/* =====================================================================
-          QUESTIONS 4–5: PIPELINE HAZARD RESOLUTION MCQs
-         ===================================================================== */}
-      {currentQ.kind === 'MCQ' && (
-        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-5">
-          <div className="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-500/40 text-xs text-emerald-200">
-            <strong>📋 WHAT YOU NEED TO DO:</strong> Inspect the assembly instructions on the pipeline timing diagram
-            below, identify the cause of the red <span className="text-rose-400 font-bold">⚠️ HAZARD</span>, and click
-            the correct architectural solution!
+      <div className={`flex flex-col gap-6 transition-all ${isPipelineCompleted ? 'opacity-25 pointer-events-none grayscale' : ''}`}>
+        {/* Top Progress Bar */}
+        <div className="bg-slate-900/90 border border-emerald-500/40 p-4 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded bg-emerald-500 text-slate-950 uppercase">
+              {currentQ.badge}
+            </span>
+            <h1 className="text-lg md:text-xl font-extrabold text-white mt-1">
+              {currentQ.title}
+            </h1>
           </div>
 
-          <div className="space-y-2.5 bg-slate-950 p-4 rounded-xl border border-slate-800 overflow-x-auto">
-            {currentQ.instructions.map((inst) => (
-              <div key={inst.id} className="flex items-center gap-3 min-w-[460px]">
-                <div
-                  className={`w-48 px-2.5 py-1.5 rounded text-xs font-bold border truncate ${
-                    inst.highlight
-                      ? 'bg-amber-500/15 border-amber-400/50 text-amber-200'
-                      : 'bg-slate-900 border-slate-800 text-slate-300'
+          <div className="flex items-center gap-2">
+            {questions.map((q, idx) => (
+              <div
+                key={q.id}
+                className={`px-3 py-1.5 rounded text-xs font-bold border ${
+                  idx === qIdx
+                    ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-extrabold shadow-[0_0_12px_rgba(16,185,129,0.4)]'
+                    : idx < qIdx
+                    ? 'bg-slate-900 text-emerald-400 border-emerald-500/30'
+                    : 'bg-slate-950 text-slate-500 border-slate-800'
+                }`}
+              >
+                {idx < qIdx ? '✓' : `Q${idx + 1}`}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* QUESTIONS 1–3: DIAGRAM BUILDER */}
+        {currentQ.kind === 'DIAGRAM' && diagramValidation && (
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-6">
+            <div className="p-4 rounded-xl bg-emerald-950/30 border border-emerald-500/40 space-y-2">
+              <div className="text-xs font-extrabold text-emerald-300 uppercase tracking-wider">
+                📋 WHAT YOU NEED TO DO (2 STEPS):
+              </div>
+              <p className="text-xs md:text-sm text-white font-bold">
+                {currentQ.instructionsText}
+              </p>
+              <ol className="list-decimal list-inside text-xs text-slate-300 space-y-1">
+                <li>
+                  <strong>Step 1 (Build the Diagram):</strong> Use the{' '}
+                  <span className="text-emerald-300 font-bold">[◀] / [▶]</span>{' '}
+                  buttons to shift <strong>I2</strong> and <strong>I3</strong> so no hardware stages collide in red!
+                </li>
+                <li>
+                  <strong>Step 2 (Calculate):</strong> Select the correct{' '}
+                  <strong>Total Clock Cycles</strong> and <strong>Max Operating Frequency (f_max)</strong> below.
+                </li>
+              </ol>
+            </div>
+
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 overflow-x-auto">
+              <div className="flex items-center justify-between mb-3 min-w-[720px]">
+                <span className="text-xs font-bold text-emerald-400 uppercase">
+                  // INTERACTIVE PIPELINE TIMING DIAGRAM (CLOCK CYCLES 1–16)
+                </span>
+                <span
+                  className={`text-xs font-extrabold px-2.5 py-1 rounded ${
+                    diagramValidation.isExactCompactAlignment
+                      ? 'bg-emerald-500/20 border border-emerald-400 text-emerald-300'
+                      : 'bg-rose-500/20 border border-rose-500 text-rose-300'
                   }`}
                 >
-                  <span className="text-emerald-400 mr-1.5">{inst.id}:</span>
-                  {inst.asm}
-                </div>
+                  {diagramValidation.isExactCompactAlignment
+                    ? '✓ VALID PIPELINE ALIGNMENT (ZERO COLLISIONS)'
+                    : '⚠️ SHIFT I2 & I3 UNTIL RED COLLISIONS CLEAR'}
+                </span>
+              </div>
 
-                <div className="flex items-center gap-1.5">
-                  {inst.stages.map((st, sIdx) => (
+              <div className="min-w-[720px] space-y-2">
+                <div className="grid grid-cols-20 gap-1 text-[10px] text-slate-400 font-bold text-center">
+                  <div className="col-span-4 text-left pl-2">INSTRUCTION</div>
+                  {Array.from({ length: 16 }, (_, c) => (
                     <div
-                      key={sIdx}
-                      className={`px-2.5 py-1.5 rounded text-xs font-extrabold border text-center min-w-[44px] ${
-                        st.trim() === ''
-                          ? 'border-transparent text-transparent'
-                          : st.includes('⚠️') || st === 'FLUSH'
-                          ? 'bg-rose-950/80 border-rose-500 text-rose-300 animate-pulse'
-                          : 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
+                      key={c}
+                      className={`py-1 rounded ${
+                        diagramValidation.collisionCols.has(c)
+                          ? 'bg-rose-500 text-slate-950 font-extrabold'
+                          : 'bg-slate-900'
                       }`}
                     >
-                      {st}
+                      C{c + 1}
                     </div>
                   ))}
                 </div>
+
+                {[
+                  { label: 'I1 (Fixed)', start: 0, setStart: null },
+                  { label: 'I2 (Shiftable)', start: i2Start, setStart: setI2Start },
+                  { label: 'I3 (Shiftable)', start: i3Start, setStart: setI3Start },
+                ].map((row, rIdx) => (
+                  <div key={row.label} className="grid grid-cols-20 gap-1 items-center">
+                    <div className="col-span-4 flex items-center justify-between bg-slate-900 px-2.5 py-1.5 rounded border border-slate-800 text-xs">
+                      <span className="font-bold text-white">{row.label}</span>
+                      {row.setStart ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => row.setStart!(Math.max(1, row.start - 1))}
+                            className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 font-extrabold text-[10px] cursor-pointer"
+                          >
+                            ◀
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => row.setStart!(Math.min(10, row.start + 1))}
+                            className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 font-extrabold text-[10px] cursor-pointer"
+                          >
+                            ▶
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-emerald-400">Start: C1</span>
+                      )}
+                    </div>
+
+                    {Array.from({ length: 16 }, (_, col) => {
+                      const stageOffset = col - row.start;
+                      const stageLetter =
+                        stageOffset >= 0 &&
+                        stageOffset < diagramValidation.stages.length
+                          ? diagramValidation.stages[stageOffset]
+                          : null;
+                      const isCollision =
+                        stageLetter !== null &&
+                        diagramValidation.collisionCols.has(col);
+
+                      return (
+                        <div
+                          key={col}
+                          onClick={() => {
+                            if (row.setStart && col >= 1 && col <= 10) row.setStart(col);
+                          }}
+                          className={`h-9 rounded flex items-center justify-center text-xs font-extrabold border transition-all ${
+                            row.setStart ? 'cursor-pointer' : ''
+                          } ${
+                            stageLetter === null
+                              ? 'bg-slate-950/60 border-slate-900 text-slate-700 hover:border-slate-700'
+                              : isCollision
+                              ? 'bg-rose-950 border-rose-500 text-rose-300 animate-pulse'
+                              : stageLetter === 'F'
+                              ? 'bg-cyan-950/80 border-cyan-500/60 text-cyan-300'
+                              : stageLetter === 'D'
+                              ? 'bg-amber-950/80 border-amber-500/60 text-amber-300'
+                              : 'bg-emerald-950/80 border-emerald-500/60 text-emerald-300'
+                          }`}
+                        >
+                          {stageLetter || '·'}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </div>
 
-          <div className="p-3.5 rounded-lg bg-rose-950/25 border border-rose-500/40 text-xs text-rose-100 leading-relaxed">
-            <strong className="text-rose-400 uppercase block mb-1">
-              ⚠️ ACTIVE PIPELINE HAZARD DETECTED:
-            </strong>
-            {currentQ.problemStatement}
-          </div>
-
-          <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800 text-xs text-slate-300">
-            <strong className="text-emerald-400">COA Architecture Principle: </strong>
-            {currentQ.coaConceptNote}
-          </div>
-
-          <div className="grid grid-cols-1 gap-3">
-            {currentQ.options.map((opt, idx) => (
-              <button
-                key={idx}
-                onClick={() => handleMcqSelect(opt)}
-                className="text-left p-4 rounded-xl bg-slate-950 hover:bg-emerald-950/40 border-2 border-emerald-500/40 hover:border-emerald-400 transition-all cursor-pointer group"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs md:text-sm font-extrabold text-emerald-300 group-hover:text-white">
-                    [{idx + 1}] {opt.label}
-                  </span>
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-bold">
-                    EXECUTE &rarr;
-                  </span>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                <div className="text-xs font-bold text-emerald-400 uppercase mb-1">
+                  2A. Select Total Clock Cycles
                 </div>
-                <p className="text-xs text-slate-400 mt-1">{opt.subtext}</p>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+                <div className="grid grid-cols-2 gap-2.5 mt-3">
+                  {currentQ.cycleChoices.map((cyc) => (
+                    <button
+                      key={cyc}
+                      type="button"
+                      onClick={() => setSelectedCycles(cyc)}
+                      className={`py-2.5 px-3 rounded-lg text-xs font-extrabold border transition-all cursor-pointer ${
+                        selectedCycles === cyc
+                          ? 'bg-emerald-500 text-slate-950 border-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.4)]'
+                          : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-emerald-500/50'
+                      }`}
+                    >
+                      {cyc} Clock Cycles
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-      {/* Feedback Banner & Next Question Button */}
-      {feedbackBanner && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className={`p-4 rounded-xl border-2 ${
-            feedbackBanner.good
-              ? 'bg-emerald-950/70 border-emerald-400 text-emerald-100'
-              : 'bg-rose-950/70 border-rose-500 text-rose-100'
-          }`}
-        >
-          <div className="text-xs font-bold leading-relaxed">{feedbackBanner.text}</div>
-          <div className="mt-2 p-2 rounded bg-slate-950 text-center text-xs font-extrabold text-amber-300">
-            {feedbackBanner.formula}
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                <div className="text-xs font-bold text-amber-300 uppercase mb-1">
+                  2B. Select Max Frequency (f_max)
+                </div>
+                <div className="grid grid-cols-2 gap-2.5 mt-3">
+                  {currentQ.freqChoices.map((freq) => (
+                    <button
+                      key={freq}
+                      type="button"
+                      onClick={() => setSelectedFreq(freq)}
+                      className={`py-2.5 px-3 rounded-lg text-xs font-extrabold border transition-all cursor-pointer ${
+                        selectedFreq === freq
+                          ? 'bg-amber-400 text-slate-950 border-amber-200 shadow-[0_0_15px_rgba(251,191,36,0.4)]'
+                          : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-amber-400/50'
+                      }`}
+                    >
+                      {freq}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {!feedbackBanner?.good && (
+              <button
+                type="button"
+                onClick={handleVerifyDiagramQuestion}
+                className="w-full py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs tracking-wider shadow-[0_0_25px_rgba(16,185,129,0.35)] cursor-pointer"
+              >
+                VERIFY DIAGRAM ALIGNMENT &amp; CALCULATIONS &rarr;
+              </button>
+            )}
           </div>
-          {feedbackBanner.good && (
-            <button
-              onClick={handleNextQuestion}
-              className="mt-3 w-full py-3 rounded-lg bg-emerald-400 text-slate-950 font-extrabold text-xs hover:bg-emerald-300 cursor-pointer"
-            >
-              {qIdx + 1 < questions.length
-                ? `PROCEED TO QUESTION ${qIdx + 2} OF ${questions.length} →`
-                : 'COMPLETE SYSTEM REBOOT & VIEW LIVE LEADERBOARD →'}
-            </button>
-          )}
-        </motion.div>
-      )}
+        )}
+
+        {/* QUESTIONS 4–5: HAZARD MCQs */}
+        {currentQ.kind === 'MCQ' && (
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-5">
+            <div className="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-500/40 text-xs text-emerald-200">
+              <strong>📋 WHAT YOU NEED TO DO:</strong> Inspect the pipeline diagram below, identify the red <span className="text-rose-400 font-bold">⚠️ HAZARD</span>, and select the correct architectural solution!
+            </div>
+
+            <div className="space-y-2.5 bg-slate-950 p-4 rounded-xl border border-slate-800 overflow-x-auto">
+              {currentQ.instructions.map((inst) => (
+                <div key={inst.id} className="flex items-center gap-3 min-w-[460px]">
+                  <div
+                    className={`w-48 px-2.5 py-1.5 rounded text-xs font-bold border truncate ${
+                      inst.highlight
+                        ? 'bg-amber-500/15 border-amber-400/50 text-amber-200'
+                        : 'bg-slate-900 border-slate-800 text-slate-300'
+                    }`}
+                  >
+                    <span className="text-emerald-400 mr-1.5">{inst.id}:</span>
+                    {inst.asm}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {inst.stages.map((st, sIdx) => (
+                      <div
+                        key={sIdx}
+                        className={`px-2.5 py-1.5 rounded text-xs font-extrabold border text-center min-w-[44px] ${
+                          st.trim() === ''
+                            ? 'border-transparent text-transparent'
+                            : st.includes('⚠️') || st === 'FLUSH'
+                            ? 'bg-rose-950/80 border-rose-500 text-rose-300 animate-pulse'
+                            : 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
+                        }`}
+                      >
+                        {st}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="p-3.5 rounded-lg bg-rose-950/25 border border-rose-500/40 text-xs text-rose-100 leading-relaxed">
+              <strong className="text-rose-400 uppercase block mb-1">
+                ⚠️ ACTIVE PIPELINE HAZARD DETECTED:
+              </strong>
+              {currentQ.problemStatement}
+            </div>
+
+            <div className="grid grid-cols-1 gap-3">
+              {currentQ.options.map((opt, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => handleMcqSelect(opt)}
+                  className="text-left p-4 rounded-xl bg-slate-950 hover:bg-emerald-950/40 border-2 border-emerald-500/40 hover:border-emerald-400 transition-all cursor-pointer group"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs md:text-sm font-extrabold text-emerald-300 group-hover:text-white">
+                      [{idx + 1}] {opt.label}
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-bold">
+                      EXECUTE &rarr;
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">{opt.subtext}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Next Question Banner */}
+        {feedbackBanner && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`p-4 rounded-xl border-2 ${
+              feedbackBanner.good
+                ? 'bg-emerald-950/70 border-emerald-400 text-emerald-100'
+                : 'bg-rose-950/70 border-rose-500 text-rose-100'
+            }`}
+          >
+            <div className="text-xs font-bold leading-relaxed">{feedbackBanner.text}</div>
+            <div className="mt-2 p-2 rounded bg-slate-950 text-center text-xs font-extrabold text-amber-300">
+              {feedbackBanner.formula}
+            </div>
+            {feedbackBanner.good && (
+              <button
+                onClick={handleNextQuestion}
+                className="mt-3 w-full py-3 rounded-lg bg-emerald-400 text-slate-950 font-extrabold text-xs hover:bg-emerald-300 cursor-pointer"
+              >
+                {qIdx + 1 < questions.length
+                  ? `PROCEED TO QUESTION ${qIdx + 2} OF ${questions.length} →`
+                  : 'COMPLETE SYSTEM REBOOT & VIEW LIVE LEADERBOARD →'}
+              </button>
+            )}
+          </motion.div>
+        )}
+      </div>
     </section>
   );
 }

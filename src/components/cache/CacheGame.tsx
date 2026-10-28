@@ -23,44 +23,35 @@ interface LevelScenario {
   waysPerSet: number;
 }
 
-/**
- * Generates randomized, pedagogically valid 8-block request sequences for each level
- * so teammates cannot memorize or copy answers!
- */
 function generateRandomizedLevels(): LevelScenario[] {
   const randInt = (min: number, max: number) =>
     Math.floor(Math.random() * (max - min + 1)) + min;
 
-  // LEVEL 1: Direct Mapping (4 lines)
-  // Pick 3 distinct remainders (rA, rB, rC), include repeat hits and modulo-4 conflict replacements
   const remPool = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
   const bA1 = remPool[0] + 4 * randInt(0, 1);
   const bB1 = remPool[1] + 4 * randInt(0, 2);
-  const bA2 = remPool[0] + 4 * randInt(2, 3); // Collides with bA1 on Line remPool[0]
+  const bA2 = remPool[0] + 4 * randInt(2, 3);
   const bC1 = remPool[2] + 4 * randInt(0, 3);
-  const bB2 = (remPool[1] + 4 * ((Math.floor(bB1 / 4) + 1) % 4)) % 16; // Collides with bB1
+  const bB2 = (remPool[1] + 4 * ((Math.floor(bB1 / 4) + 1) % 4)) % 16;
   const directSeq = [bA1, bB1, bA1, bA2, bC1, bB1, bB2, bA2];
 
-  // LEVEL 2: Fully Associative (4 lines + LRU)
-  // Pick 6 unique blocks (0..15): first 4 fill the cache, 5th hits one of the first 2 (updating LRU!), 6th & 7th force LRU eviction
   const allBlocks = Array.from({ length: 16 }, (_, i) => i).sort(
     () => Math.random() - 0.5
   );
   const [f0, f1, f2, f3, f4, f5] = allBlocks;
   const assocSeq = [f0, f1, f2, f3, f0, f4, f1, f5];
 
-  // LEVEL 3: 2-Way Set Associative (2 Sets: Even blocks -> Set 0, Odd blocks -> Set 1)
   const evens = [0, 2, 4, 6, 8, 10, 12, 14].sort(() => Math.random() - 0.5);
   const odds = [1, 3, 5, 7, 9, 11, 13, 15].sort(() => Math.random() - 0.5);
   const setAssocSeq = [
     evens[0],
     evens[1],
     odds[0],
-    evens[0], // Hit in Set 0 (makes evens[1] the LRU in Set 0!)
-    evens[2], // Evicts evens[1] in Set 0
+    evens[0],
+    evens[2],
     odds[1],
-    odds[2], // Evicts odds[0] in Set 1
-    evens[2], // Hit in Set 0
+    odds[2],
+    evens[2],
   ];
 
   return [
@@ -115,9 +106,8 @@ export default function CacheGame() {
     setPhase,
   } = useGameStore();
 
-  const [levels, setLevels] = useState<LevelScenario[]>(() =>
-    generateRandomizedLevels()
-  );
+  const [isMounted, setIsMounted] = useState(false);
+  const [levels, setLevels] = useState<LevelScenario[]>([]);
   const [currentLevelIdx, setCurrentLevelIdx] = useState(0);
   const [stepIdx, setStepIdx] = useState(0);
   const [lines, setLines] = useState<CacheLineState[]>(INITIAL_LINES);
@@ -127,31 +117,36 @@ export default function CacheGame() {
     isError: boolean;
   } | null>(null);
 
-  // Re-randomize if game is reset
+  // Defer random generation to client-side mount to prevent Vercel SSR build error
   useEffect(() => {
-    if (!isCacheCompleted && currentLevelIdx === 0 && stepIdx === 0) {
+    setLevels(generateRandomizedLevels());
+    setIsMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (isMounted && !isCacheCompleted && currentLevelIdx === 0 && stepIdx === 0) {
       setLevels(generateRandomizedLevels());
     }
-  }, [isCacheCompleted]);
+  }, [isCacheCompleted, isMounted, currentLevelIdx, stepIdx]);
 
   const scenario = levels[currentLevelIdx];
-  const currentBlock = scenario.sequence[stepIdx];
+  const currentBlock = scenario?.sequence[stepIdx];
 
   useEffect(() => {
-    setLevelConfig(scenario.level, scenario.mode, 4, scenario.waysPerSet);
+    if (scenario) {
+      setLevelConfig(scenario.level, scenario.mode, 4, scenario.waysPerSet);
+    }
   }, [currentLevelIdx, scenario, setLevelConfig]);
 
   useEffect(() => {
-    setActiveBlock(currentBlock ?? null);
-  }, [currentBlock, setActiveBlock]);
-
-  const existingHitLine =
-    lines.find((l) => l.valid && l.blockNumber === currentBlock)?.lineIndex ??
-    null;
+    if (isMounted) {
+      setActiveBlock(currentBlock ?? null);
+    }
+  }, [currentBlock, setActiveBlock, isMounted]);
 
   const getIsLruCandidate = useCallback(
     (line: CacheLineState): boolean => {
-      if (!line.valid) return false;
+      if (!line.valid || !scenario) return false;
       if (scenario.mode === 'ASSOCIATIVE') {
         if (lines.some((l) => !l.valid)) return false;
         const oldest = lines.reduce((min, curr) =>
@@ -172,8 +167,19 @@ export default function CacheGame() {
       }
       return false;
     },
-    [lines, scenario.mode, scenario.waysPerSet]
+    [lines, scenario]
   );
+
+  if (!isMounted || levels.length === 0 || currentBlock === undefined) {
+    return (
+      <div className="flex h-64 items-center justify-center font-mono text-emerald-400 animate-pulse text-xs uppercase tracking-widest">
+        INITIALIZING CACHE SUBSYSTEM...
+      </div>
+    );
+  }
+
+  const existingHitLine =
+    lines.find((l) => l.valid && l.blockNumber === currentBlock)?.lineIndex ?? null;
 
   const handleDropIntoLine = (targetLineIndex: number) => {
     if (isCacheCompleted || currentBlock === undefined) return;
@@ -266,7 +272,6 @@ export default function CacheGame() {
 
   return (
     <section className="relative max-w-6xl mx-auto w-full px-4 py-6 font-mono flex flex-col gap-6">
-      {/* Greyed-Out Lock Overlay when Phase 1 is Completed */}
       {isCacheCompleted && (
         <div className="fixed inset-0 z-30 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
           <motion.div
@@ -281,9 +286,9 @@ export default function CacheGame() {
               CACHE SUBSYSTEM STABILIZED
             </h2>
             <p className="text-xs md:text-sm text-slate-300 mb-6 leading-relaxed">
-              All 3 Cache Mapping levels (Direct, Associative LRU, and 2-Way Set-Associative) are locked in. You must
-              now advance to <strong className="text-emerald-400">Phase 2: Instruction Pipeline Overdrive</strong> to
-              complete your system reboot!
+              All 3 Cache Mapping levels are locked in. You must now advance to{' '}
+              <strong className="text-emerald-400">Phase 2: Instruction Pipeline Overdrive</strong> to complete your
+              system reboot!
             </p>
             <button
               onClick={() => setPhase('PIPELINE')}
@@ -295,13 +300,7 @@ export default function CacheGame() {
         </div>
       )}
 
-      {/* Main Content (Greyed out and non-interactive if completed) */}
-      <div
-        className={`flex flex-col gap-6 transition-all ${
-          isCacheCompleted ? 'opacity-25 pointer-events-none grayscale' : ''
-        }`}
-      >
-        {/* Top Level Banner & Locked Progression Indicator */}
+      <div className={`flex flex-col gap-6 transition-all ${isCacheCompleted ? 'opacity-25 pointer-events-none grayscale' : ''}`}>
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/80 border border-emerald-500/30 p-4 rounded-xl">
           <div>
             <h1 className="text-base md:text-lg font-extrabold text-white tracking-wide">
@@ -310,7 +309,6 @@ export default function CacheGame() {
             <p className="text-xs text-emerald-400/90 mt-0.5">{scenario.subtitle}</p>
           </div>
 
-          {/* Progression Pills (Locked so players cannot farm earlier levels) */}
           <div className="flex items-center gap-2">
             {levels.map((lvl, idx) => {
               const isCompletedLvl = idx < currentLevelIdx;
@@ -333,12 +331,9 @@ export default function CacheGame() {
           </div>
         </div>
 
-        {/* Live Telemetry Bar */}
         <LiveTelemetryDashboard />
 
-        {/* Main Split Game Chamber */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* LEFT COLUMN: Main Memory Request Stream */}
           <div className="lg:col-span-5 bg-slate-900/70 border border-slate-800 rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
               <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
@@ -361,7 +356,6 @@ export default function CacheGame() {
               onSelect={() => {}}
             />
 
-            {/* FIXED ALIGNMENT: Upcoming CPU Block Request Queue */}
             <div className="mt-5 pt-4 border-t border-slate-800/80">
               <div className="flex items-center justify-between text-[10px] text-slate-400 uppercase tracking-wider mb-2.5">
                 <span>Upcoming CPU Block Request Queue</span>
@@ -393,7 +387,6 @@ export default function CacheGame() {
             </div>
           </div>
 
-          {/* RIGHT COLUMN: Cache Memory Lines */}
           <div className="lg:col-span-7 bg-slate-900/70 border border-slate-800 rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
               <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
