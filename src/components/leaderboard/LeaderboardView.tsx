@@ -4,7 +4,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useGameStore } from '@/store/gameStore';
-import { formatTime } from '../ui/TopSystemHUD';
 
 export interface LeaderboardEntry {
   id: string;
@@ -18,6 +17,12 @@ export interface LeaderboardEntry {
 
 const STORAGE_KEY = 'coa_leaderboard_backup_v1';
 const RESET_KEY = 'coa_leaderboard_reset_ts';
+
+function formatClock(totalSeconds: number): string {
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
 
 export function mergeAndSortEntries(
   localList: LeaderboardEntry[],
@@ -84,7 +89,6 @@ export default function LeaderboardView() {
       try {
         const lastSeenReset = Number(localStorage.getItem(RESET_KEY)) || 0;
         if (serverResetTs > lastSeenReset) {
-          // Intentional ?reset=vitap occurred -> clear local backup
           localStorage.setItem(RESET_KEY, String(serverResetTs));
           localStorage.removeItem(STORAGE_KEY);
         } else {
@@ -100,7 +104,6 @@ export default function LeaderboardView() {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
       } catch {}
 
-      // Self-heal serverless cold start if client has entries missing from server
       if (merged.length > serverEntries.length) {
         fetch('/api/leaderboard', {
           method: 'POST',
@@ -188,7 +191,7 @@ export default function LeaderboardView() {
             <div className="bg-slate-950 p-3 rounded-xl border border-cyan-500/40 text-center">
               <div className="text-[10px] text-slate-400 uppercase">Completion Time</div>
               <div className="text-lg font-extrabold text-cyan-300">
-                {formatTime(elapsedSeconds)}
+                {formatClock(elapsedSeconds)}
               </div>
             </div>
             <div className="bg-slate-950 p-3 rounded-xl border border-purple-500/40 text-center">
@@ -267,7 +270,7 @@ export default function LeaderboardView() {
                   <div className="text-right">
                     <div className="text-[10px] text-slate-500">TIME</div>
                     <div className="font-bold text-cyan-300">
-                      {formatTime(entry.timeSeconds ?? 0)}
+                      {formatClock(entry.timeSeconds ?? 0)}
                     </div>
                   </div>
                   <div className="text-right min-w-[85px]">

@@ -1,3 +1,10 @@
+// src/components/ui/TutorialOverlay.tsx
+'use client';
+
+import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useGameStore } from '@/store/gameStore';
+
 const WALKTHROUGH_STEPS = [
   {
     id: 0,
@@ -113,3 +120,164 @@ const WALKTHROUGH_STEPS = [
     ),
   },
 ];
+
+export default function TutorialOverlay() {
+  const {
+    isTutorialOpen,
+    tutorialStep,
+    setTutorialStep,
+    closeTutorial,
+    playerName,
+    playerRegNo,
+    hasRegistered,
+    setPlayerInfo,
+  } = useGameStore();
+
+  const [nameInput, setNameInput] = useState(playerName);
+  const [regInput, setRegInput] = useState(playerRegNo);
+  const [nameError, setNameError] = useState(false);
+
+  if (!isTutorialOpen) return null;
+
+  const currentStep = WALKTHROUGH_STEPS[tutorialStep] || WALKTHROUGH_STEPS[0];
+
+  const handleStartOrClose = () => {
+    if (!hasRegistered) {
+      if (!nameInput.trim()) {
+        setNameError(true);
+        return;
+      }
+      setPlayerInfo(nameInput, regInput);
+    }
+    closeTutorial();
+  };
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 font-mono"
+      >
+        <motion.div
+          initial={{ scale: 0.94, y: 15 }}
+          animate={{ scale: 1, y: 0 }}
+          exit={{ scale: 0.94, y: 15 }}
+          className="w-full max-w-2xl bg-slate-900 border-2 border-emerald-500/60 rounded-xl shadow-[0_0_50px_rgba(16,185,129,0.25)] overflow-hidden"
+        >
+          <div className="bg-slate-950 px-5 py-3 border-b border-emerald-500/30 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-xs font-bold tracking-widest text-emerald-400 uppercase">
+                COA FIELD MANUAL &amp; TECHNICIAN LOGIN
+              </span>
+            </div>
+            {hasRegistered && (
+              <button
+                onClick={closeTutorial}
+                className="text-xs text-slate-400 hover:text-rose-400 font-bold px-2 py-0.5 rounded cursor-pointer"
+              >
+                [ESC / RESUME]
+              </button>
+            )}
+          </div>
+
+          {!hasRegistered && (
+            <div className="bg-emerald-950/30 border-b border-emerald-500/40 px-6 py-4">
+              <div className="text-xs font-bold text-emerald-300 uppercase mb-2">
+                ⚡ STEP 1: IDENTIFY YOURSELF FOR THE LIVE CLASS LEADERBOARD
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <input
+                    type="text"
+                    placeholder="ENTER YOUR NAME / CALLSIGN *"
+                    value={nameInput}
+                    onChange={(e) => {
+                      setNameInput(e.target.value);
+                      setNameError(false);
+                    }}
+                    maxLength={16}
+                    className={`w-full bg-slate-950 border rounded-lg px-3.5 py-2 text-xs text-white focus:outline-none ${
+                      nameError
+                        ? 'border-rose-500 shadow-[0_0_12px_rgba(244,63,94,0.4)]'
+                        : 'border-emerald-500/50 focus:border-emerald-400'
+                    }`}
+                  />
+                  {nameError && (
+                    <span className="text-[10px] text-rose-400 mt-1 block">
+                      Please enter your name/username before starting!
+                    </span>
+                  )}
+                </div>
+                <div>
+                  <input
+                    type="text"
+                    placeholder="REG NO (OPTIONAL, e.g. 25BCA7363)"
+                    value={regInput}
+                    onChange={(e) => setRegInput(e.target.value)}
+                    maxLength={12}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3.5 py-2 text-xs text-white focus:outline-none focus:border-emerald-400"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-4 border-b border-slate-800 bg-slate-950/50">
+            {WALKTHROUGH_STEPS.map((step, index) => (
+              <button
+                key={step.id}
+                onClick={() => setTutorialStep(index)}
+                className={`py-2.5 px-2 text-[10px] md:text-xs font-bold tracking-wider border-b-2 transition-all cursor-pointer ${
+                  tutorialStep === index
+                    ? 'border-emerald-400 text-emerald-300 bg-emerald-500/10'
+                    : 'border-transparent text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                {step.tag}
+              </button>
+            ))}
+          </div>
+
+          <div className="p-6 min-h-[250px] flex flex-col justify-between">
+            <div>
+              <h2 className="text-lg font-extrabold text-white">{currentStep.title}</h2>
+              <p className="text-xs text-emerald-400/80 mb-3">{currentStep.subtitle}</p>
+              {currentStep.content}
+            </div>
+
+            <div className="mt-6 pt-4 border-t border-slate-800 flex items-center justify-between">
+              <button
+                onClick={() => setTutorialStep(Math.max(0, tutorialStep - 1))}
+                disabled={tutorialStep === 0}
+                className="px-4 py-2 rounded text-xs font-bold border border-slate-700 text-slate-300 disabled:opacity-30 cursor-pointer"
+              >
+                &larr; PREV TAB
+              </button>
+
+              <div className="flex items-center gap-2">
+                {tutorialStep < WALKTHROUGH_STEPS.length - 1 && (
+                  <button
+                    onClick={() => setTutorialStep(tutorialStep + 1)}
+                    className="px-4 py-2 rounded text-xs font-bold bg-slate-800 text-emerald-300 hover:bg-slate-700 cursor-pointer"
+                  >
+                    NEXT TAB &rarr;
+                  </button>
+                )}
+
+                <button
+                  onClick={handleStartOrClose}
+                  className="px-5 py-2 rounded text-xs font-extrabold bg-emerald-500 text-slate-950 hover:bg-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.5)] cursor-pointer"
+                >
+                  {hasRegistered ? 'RESUME GAME →' : 'START REBOOT SEQUENCE →'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
