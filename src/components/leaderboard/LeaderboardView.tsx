@@ -6,7 +6,7 @@ import { motion } from 'framer-motion';
 import { useGameStore } from '@/store/gameStore';
 import { formatTime } from '../ui/TopSystemHUD';
 
-interface LeaderboardEntry {
+export interface LeaderboardEntry {
   id: string;
   name: string;
   regNo: string;
@@ -14,6 +14,33 @@ interface LeaderboardEntry {
   hitRatio: number;
   cpi: number;
   timeSeconds: number;
+}
+
+const STORAGE_KEY = 'coa_leaderboard_backup_v1';
+const RESET_KEY = 'coa_leaderboard_reset_ts';
+
+export function mergeAndSortEntries(
+  localList: LeaderboardEntry[],
+  serverList: LeaderboardEntry[]
+): LeaderboardEntry[] {
+  const map = new Map<string, LeaderboardEntry>();
+  for (const item of [...localList, ...serverList]) {
+    if (!item || !item.name) continue;
+    const key = `${item.name.toUpperCase()}::${(item.regNo || 'VIT-AP').toUpperCase()}`;
+    const existing = map.get(key);
+    if (
+      !existing ||
+      item.score > existing.score ||
+      (item.score === existing.score &&
+        (item.timeSeconds || 9999) < (existing.timeSeconds || 9999))
+    ) {
+      map.set(key, item);
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return (a.timeSeconds || 9999) - (b.timeSeconds || 9999);
+  });
 }
 
 export default function LeaderboardView() {
@@ -38,18 +65,49 @@ export default function LeaderboardView() {
   const hitRatio =
     totalAccesses > 0 ? Number(((hits / totalAccesses) * 100).toFixed(1)) : 100;
 
-  // Accuracy + CPI + Speed Bonus (Faster completion under 8 mins = higher bonus!)
   const accuracyBonus =
     score > 0 ? Math.round(hitRatio * 2 + Math.max(0, (2.0 - cpi) * 150)) : 0;
   const speedBonus =
     score > 0 ? Math.max(0, Math.round((480 - elapsedSeconds) * 1.5)) : 0;
   const finalEfficiencyScore = score + accuracyBonus + speedBonus;
 
-  const fetchLeaderboard = useCallback(async () => {
+  const syncLeaderboard = useCallback(async () => {
     try {
       const res = await fetch('/api/leaderboard', { cache: 'no-store' });
       const data = await res.json();
-      if (data.entries) setEntries(data.entries);
+      const serverEntries: LeaderboardEntry[] = Array.isArray(data.entries)
+        ? data.entries
+        : [];
+      const serverResetTs = Number(data.resetTimestamp) || 0;
+
+      let localCached: LeaderboardEntry[] = [];
+      try {
+        const lastSeenReset = Number(localStorage.getItem(RESET_KEY)) || 0;
+        if (serverResetTs > lastSeenReset) {
+          // Intentional ?reset=vitap occurred -> clear local backup
+          localStorage.setItem(RESET_KEY, String(serverResetTs));
+          localStorage.removeItem(STORAGE_KEY);
+        } else {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) localCached = JSON.parse(raw);
+        }
+      } catch {}
+
+      const merged = mergeAndSortEntries(localCached, serverEntries);
+      setEntries(merged);
+
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+      } catch {}
+
+      // Self-heal serverless cold start if client has entries missing from server
+      if (merged.length > serverEntries.length) {
+        fetch('/api/leaderboard', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ knownEntries: merged }),
+        }).catch(() => {});
+      }
     } catch {}
   }, []);
 
@@ -57,6 +115,12 @@ export default function LeaderboardView() {
     const submitAndFetch = async () => {
       if (playerName && finalEfficiencyScore > 0 && !hasPostedRef.current) {
         hasPostedRef.current = true;
+        let localCached: LeaderboardEntry[] = [];
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) localCached = JSON.parse(raw);
+        } catch {}
+
         try {
           const res = await fetch('/api/leaderboard', {
             method: 'POST',
@@ -68,19 +132,26 @@ export default function LeaderboardView() {
               hitRatio,
               cpi,
               timeSeconds: elapsedSeconds,
+              knownEntries: localCached,
             }),
           });
           const data = await res.json();
-          if (data.entries) setEntries(data.entries);
+          if (Array.isArray(data.entries)) {
+            const merged = mergeAndSortEntries(localCached, data.entries);
+            setEntries(merged);
+            try {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+            } catch {}
+          }
           setAutoSubmitted(true);
           return;
         } catch {}
       }
-      fetchLeaderboard();
+      syncLeaderboard();
     };
 
     submitAndFetch();
-    const interval = setInterval(fetchLeaderboard, 4000);
+    const interval = setInterval(syncLeaderboard, 4000);
     return () => clearInterval(interval);
   }, [
     playerName,
@@ -89,7 +160,7 @@ export default function LeaderboardView() {
     hitRatio,
     cpi,
     elapsedSeconds,
-    fetchLeaderboard,
+    syncLeaderboard,
   ]);
 
   return (
@@ -150,9 +221,9 @@ export default function LeaderboardView() {
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden">
         <div className="px-6 py-3.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
           <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
-            // TOP SYSTEM ARCHITECTS (RANKED BY SCORE &amp; SPEED)
+            // TOP SYSTEM ARCHITECTS (PERSISTENT AUTO-SYNC)
           </span>
-          <span className="text-[10px] text-slate-500">AUTO-REFRESH EVERY 4S</span>
+          <span className="text-[10px] text-slate-500">RANKED BY SCORE &amp; SPEED</span>
         </div>
 
         {entries.length === 0 ? (
@@ -163,7 +234,7 @@ export default function LeaderboardView() {
           <div className="divide-y divide-slate-800/70">
             {entries.map((entry, idx) => (
               <motion.div
-                key={entry.id}
+                key={`${entry.name}-${entry.regNo}`}
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
                 className="px-6 py-3.5 flex items-center justify-between text-xs"
@@ -212,7 +283,7 @@ export default function LeaderboardView() {
         )}
       </div>
 
-      {/* Credible Academic References & Replay Controls */}
+      {/* Academic References & Replay Controls */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center bg-slate-900/70 border border-slate-800 p-4 rounded-xl text-xs">
         <div className="md:col-span-9 text-slate-400 space-y-1 leading-relaxed">
           <div className="text-emerald-400 font-bold uppercase mb-1">

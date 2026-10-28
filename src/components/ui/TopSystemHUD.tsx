@@ -4,6 +4,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '@/store/gameStore';
+import { LeaderboardEntry, mergeAndSortEntries } from '../leaderboard/LeaderboardView';
 
 export function formatTime(totalSeconds: number): string {
   const mins = Math.floor(totalSeconds / 60);
@@ -11,15 +12,7 @@ export function formatTime(totalSeconds: number): string {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
-interface LeaderboardEntry {
-  id: string;
-  name: string;
-  regNo: string;
-  score: number;
-  hitRatio: number;
-  cpi: number;
-  timeSeconds?: number;
-}
+const STORAGE_KEY = 'coa_leaderboard_backup_v1';
 
 export default function TopSystemHUD() {
   const {
@@ -27,7 +20,6 @@ export default function TopSystemHUD() {
     streak,
     phase,
     level,
-    mappingMode,
     elapsedSeconds,
     isTimerRunning,
     tickTimer,
@@ -41,7 +33,6 @@ export default function TopSystemHUD() {
 
   const [liveEntries, setLiveEntries] = useState<LeaderboardEntry[]>([]);
 
-  // 1-second stopwatch ticker
   useEffect(() => {
     if (!isTimerRunning) return;
     const interval = setInterval(() => {
@@ -54,7 +45,20 @@ export default function TopSystemHUD() {
     try {
       const res = await fetch('/api/leaderboard', { cache: 'no-store' });
       const data = await res.json();
-      if (data.entries) setLiveEntries(data.entries);
+      const serverEntries: LeaderboardEntry[] = Array.isArray(data.entries)
+        ? data.entries
+        : [];
+      let localCached: LeaderboardEntry[] = [];
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) localCached = JSON.parse(raw);
+      } catch {}
+
+      const merged = mergeAndSortEntries(localCached, serverEntries);
+      setLiveEntries(merged);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+      } catch {}
     } catch {}
   }, []);
 
@@ -68,7 +72,7 @@ export default function TopSystemHUD() {
   const handleOpenManual = () => {
     if (phase === 'PIPELINE') {
       openTutorial(3);
-    } else if (mappingMode === 'DIRECT') {
+    } else if (level === 1) {
       openTutorial(1);
     } else {
       openTutorial(2);
@@ -78,7 +82,6 @@ export default function TopSystemHUD() {
   return (
     <>
       <header className="fixed top-0 left-0 right-0 z-40 h-16 bg-slate-950/90 backdrop-blur-md border-b border-emerald-500/30 px-3 md:px-6 flex items-center justify-between font-mono select-none">
-        {/* LEFT: System Status & Creator Credit */}
         <div className="flex items-center gap-2.5">
           <div className="h-3 w-3 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_10px_#34d399]" />
           <div>
@@ -90,10 +93,10 @@ export default function TopSystemHUD() {
             </div>
             <div className="text-xs md:text-sm font-bold text-emerald-300 tracking-wider">
               {phase === 'CACHE'
-                ? `LVL 0${level} : ${mappingMode} MAP`
+                ? `MODULE 5 : STAGE 0${level} OF 03`
                 : phase === 'PIPELINE'
-                ? 'PHASE 2 : PIPELINE OVERDRIVE'
-                : 'PHASE 3 : LEADERBOARD'}
+                ? 'MODULE 6 : PIPELINE OVERDRIVE'
+                : 'FINAL : LIVE LEADERBOARD'}
             </div>
           </div>
         </div>
@@ -101,7 +104,6 @@ export default function TopSystemHUD() {
         {/* CENTER: Persistent Score Counter + Stopwatch */}
         <div className="absolute left-1/2 -translate-x-1/2 top-1 flex flex-col items-center">
           <div className="bg-slate-900/95 border-2 border-emerald-500/60 px-4 md:px-6 py-1 rounded-b-xl shadow-[0_0_25px_rgba(16,185,129,0.25)] flex items-center gap-4 md:gap-6">
-            {/* Score Column */}
             <div className="text-center">
               <span className="block text-[9px] uppercase tracking-[0.2em] text-emerald-500/80">
                 System Score
@@ -121,7 +123,6 @@ export default function TopSystemHUD() {
 
             <div className="h-7 w-[1px] bg-slate-800" />
 
-            {/* Live Stopwatch Column */}
             <div className="text-center">
               <span className="block text-[9px] uppercase tracking-[0.2em] text-cyan-400/80">
                 Elapsed Time
@@ -174,7 +175,7 @@ export default function TopSystemHUD() {
         </div>
       </header>
 
-      {/* LIVE LEADERBOARD OVERLAY MODAL (Accessible anytime during gameplay) */}
+      {/* LIVE LEADERBOARD OVERLAY MODAL */}
       <AnimatePresence>
         {isLeaderboardModalOpen && (
           <motion.div
@@ -193,7 +194,7 @@ export default function TopSystemHUD() {
                 <div className="flex items-center gap-2">
                   <span>🏆</span>
                   <span className="text-xs font-extrabold tracking-widest text-cyan-300 uppercase">
-                    LIVE CLASSROOM STANDINGS (AUTO-SYNCING)
+                    LIVE CLASSROOM STANDINGS (PERSISTENT SYNC)
                   </span>
                 </div>
                 <button
@@ -204,7 +205,6 @@ export default function TopSystemHUD() {
                 </button>
               </div>
 
-              {/* Player's Current In-Progress Status */}
               <div className="bg-cyan-950/25 px-5 py-3 border-b border-slate-800 flex items-center justify-between text-xs">
                 <div>
                   <span className="text-slate-400">Your Active Run: </span>
@@ -220,7 +220,6 @@ export default function TopSystemHUD() {
                 </div>
               </div>
 
-              {/* Standings List */}
               <div className="max-h-[340px] overflow-y-auto divide-y divide-slate-800/70">
                 {liveEntries.length === 0 ? (
                   <div className="p-8 text-center text-xs text-slate-500">
@@ -229,7 +228,7 @@ export default function TopSystemHUD() {
                 ) : (
                   liveEntries.map((entry, idx) => (
                     <div
-                      key={entry.id}
+                      key={`${entry.name}-${entry.regNo}`}
                       className="px-5 py-3 flex items-center justify-between text-xs"
                     >
                       <div className="flex items-center gap-3">

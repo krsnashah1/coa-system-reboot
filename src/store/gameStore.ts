@@ -1,6 +1,5 @@
 // src/store/gameStore.ts
 import { create } from 'zustand';
-import { CacheLineState } from '@/lib/mapping';
 
 export type GamePhase = 'CACHE' | 'PIPELINE' | 'LEADERBOARD';
 export type CacheMappingMode = 'DIRECT' | 'ASSOCIATIVE' | 'SET_ASSOCIATIVE';
@@ -12,35 +11,14 @@ interface HintData {
   type: 'ERROR' | 'TACTICAL';
 }
 
-export interface CacheLevelScenario {
-  level: number;
-  mode: CacheMappingMode;
-  title: string;
-  subtitle: string;
-  sequence: number[];
-  waysPerSet: number;
-}
-
-const INITIAL_CACHE_LINES: CacheLineState[] = [0, 1, 2, 3].map((idx) => ({
-  lineIndex: idx,
-  valid: false,
-  tag: '',
-  blockNumber: null,
-  dataHex: null,
-  lastUsedStep: 0,
-}));
-
 interface GameState {
-  // Player Identity
   playerName: string;
   playerRegNo: string;
   hasRegistered: boolean;
 
-  // Stopwatch / Timer
   elapsedSeconds: number;
   isTimerRunning: boolean;
 
-  // Progression & Locks
   phase: GamePhase;
   isCacheCompleted: boolean;
   isPipelineCompleted: boolean;
@@ -49,31 +27,20 @@ interface GameState {
   score: number;
   streak: number;
 
-  // Persistent Cache Progress (So Levels 2 & 3 keep blocks from Level 1!)
-  cacheLevels: CacheLevelScenario[];
-  cacheLevelIdx: number;
-  cacheStepIdx: number;
-  cacheLines: CacheLineState[];
-  cacheStepCounter: number;
-
-  // Telemetry Metrics
   hits: number;
   misses: number;
   cpi: number;
 
-  // Active Game Context
   activeBlockAddress: number | null;
   totalCacheLines: number;
   waysPerSet: number;
 
-  // UI Overlays
   isTutorialOpen: boolean;
   tutorialStep: number;
   isLeaderboardModalOpen: boolean;
   activeHint: HintData | null;
   isGlitching: boolean;
 
-  // Actions
   setPlayerInfo: (name: string, regNo: string) => void;
   tickTimer: () => void;
   stopTimer: () => void;
@@ -82,15 +49,6 @@ interface GameState {
   completePipelinePhase: () => void;
   setLevelConfig: (level: number, mode: CacheMappingMode, lines: number, ways?: number) => void;
   setActiveBlock: (address: number | null) => void;
-
-  // Persistent Cache Actions
-  initCacheLevels: (levels: CacheLevelScenario[]) => void;
-  setCacheProgress: (
-    levelIdx: number,
-    stepIdx: number,
-    lines: CacheLineState[],
-    stepCounter: number
-  ) => void;
 
   addScore: (points: number) => void;
   recordHit: () => void;
@@ -123,12 +81,6 @@ export const useGameStore = create<GameState>((set, get) => ({
   mappingMode: 'DIRECT',
   score: 0,
   streak: 0,
-
-  cacheLevels: [],
-  cacheLevelIdx: 0,
-  cacheStepIdx: 0,
-  cacheLines: INITIAL_CACHE_LINES,
-  cacheStepCounter: 1,
 
   hits: 0,
   misses: 0,
@@ -176,14 +128,6 @@ export const useGameStore = create<GameState>((set, get) => ({
     set({ level, mappingMode, totalCacheLines, waysPerSet }),
 
   setActiveBlock: (address) => set({ activeBlockAddress: address }),
-
-  initCacheLevels: (levels) =>
-    set((state) =>
-      state.cacheLevels.length > 0 ? state : { cacheLevels: levels }
-    ),
-
-  setCacheProgress: (cacheLevelIdx, cacheStepIdx, cacheLines, cacheStepCounter) =>
-    set({ cacheLevelIdx, cacheStepIdx, cacheLines, cacheStepCounter }),
 
   addScore: (points) =>
     set((state) => ({
@@ -237,39 +181,37 @@ export const useGameStore = create<GameState>((set, get) => ({
   triggerHint: (hint) => set({ activeHint: hint }),
 
   requestTacticalHint: () => {
-    const { phase, mappingMode, activeBlockAddress, totalCacheLines, waysPerSet } = get();
+    const { phase, level, activeBlockAddress, totalCacheLines } = get();
 
     if (phase === 'CACHE') {
-      if (mappingMode === 'DIRECT') {
+      if (level === 1) {
         const exampleBlock = activeBlockAddress ?? 4;
         const targetLine = exampleBlock % totalCacheLines;
         set({
           activeHint: {
-            title: 'TACTICAL HINT // DIRECT MAPPING',
+            title: 'TACTICAL HINT // LVL 1: DIRECT MAPPING',
             message: `Divide Block #${exampleBlock} by ${totalCacheLines} total cache lines. The remainder is the ONLY line where this block can go!`,
             formula: `Line = ${exampleBlock} mod ${totalCacheLines} = CACHE LINE ${targetLine}`,
             type: 'TACTICAL',
           },
         });
-      } else if (mappingMode === 'ASSOCIATIVE') {
+      } else if (level === 2) {
         set({
           activeHint: {
-            title: 'TACTICAL HINT // FULLY ASSOCIATIVE + LRU',
+            title: 'TACTICAL HINT // LVL 2: MEMORY HIERARCHY PYRAMID',
             message:
-              'If the requested block is already in a line, click it for a Hit! Otherwise, use any empty line (V:0), or overwrite the line marked "LRU (OLDEST)"!',
-            formula: 'Hit -> Click Matching Line | Full -> Evict LRU (OLDEST)',
+              'Order from TOP (Fastest Access Time & Highest Cost/Bit) to BOTTOM (Largest Capacity & Slowest Access): L0 = CPU Registers -> L1 = Cache (SRAM) -> L2 = Main Memory (DRAM) -> L3 = Magnetic Disk -> L4 = Magnetic Tape!',
+            formula: 'Top-to-Bottom: Registers < SRAM < DRAM < Disk < Tape',
             type: 'TACTICAL',
           },
         });
       } else {
-        const totalSets = totalCacheLines / waysPerSet;
-        const exampleBlock = activeBlockAddress ?? 2;
-        const targetSet = exampleBlock % totalSets;
         set({
           activeHint: {
-            title: 'TACTICAL HINT // 2-WAY SET-ASSOCIATIVE',
-            message: `Block #${exampleBlock} maps to Set ${targetSet} (Lines ${targetSet * 2} & ${targetSet * 2 + 1}). Use an empty line in Set ${targetSet} first, or evict Set ${targetSet}'s LRU (OLDEST) line!`,
-            formula: `Set = ${exampleBlock} mod ${totalSets} = SET ${targetSet}`,
+            title: 'TACTICAL HINT // LVL 3: PA BIT SPLIT & 3Cs MISSES',
+            message:
+              '1) Offset Bits = log2(Block Size). 2) Cache Lines = Cache Size / Block Size. 3) Sets = Lines / k-Way -> Set Bits = log2(Sets). 4) Tag Bits = Total PA Bits - Set Bits - Offset Bits!',
+            formula: 'PA Bits = Tag Bits + Set Index Bits + Word Offset Bits',
             type: 'TACTICAL',
           },
         });
@@ -279,7 +221,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         activeHint: {
           title: 'TACTICAL HINT // PIPELINE TIMING METHODS',
           message:
-            'Check the Question Badge! For NON-PIPELINED (Non-Overlapping), I2 starts only AFTER I1 finishes E (Cycles = N × C1). For PIPELINED (Overlapping), I2 starts after Δ = max(IF, D, E) cycles!',
+            'Check the Question Banner! For NON-PIPELINED (Non-Overlapping), I2 starts only AFTER I1 finishes E (Cycles = N × C1). For PIPELINED (Overlapping), I2 starts after Δ = max(IF, D, E) cycles!',
           formula: 'Non-Pipe = N × C1 | Pipelined = C1 + (N - 1) × Δ',
           type: 'TACTICAL',
         },
@@ -302,11 +244,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       isPipelineCompleted: false,
       elapsedSeconds: 0,
       isTimerRunning: state.hasRegistered,
-      cacheLevels: [],
-      cacheLevelIdx: 0,
-      cacheStepIdx: 0,
-      cacheLines: INITIAL_CACHE_LINES,
-      cacheStepCounter: 1,
       activeHint: null,
     })),
 }));
