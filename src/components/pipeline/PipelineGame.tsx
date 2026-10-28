@@ -1,14 +1,35 @@
 // src/components/pipeline/PipelineGame.tsx
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useGameStore } from '@/store/gameStore';
 import { sound } from '@/lib/sound';
 
-interface HazardChallenge {
+interface DiagramQuestion {
+  kind: 'DIAGRAM';
   id: number;
-  roundTitle: string;
+  title: string;
+  badge: string;
+  instructionsText: string;
+  ifCycles: number;
+  dCycles: number;
+  eCycles: number;
+  totalInstructions: number;
+  fmcGHz: number;
+  flushInterval?: number; // Used in Question 3 (Pipeline Flush problem)
+  expectedShift: number;
+  expectedTotalCycles: number;
+  expectedFmax: string;
+  cycleChoices: number[];
+  freqChoices: string[];
+  formulaNote: string;
+}
+
+interface McqQuestion {
+  kind: 'MCQ';
+  id: number;
+  title: string;
   badge: string;
   instructions: {
     id: string;
@@ -29,138 +50,378 @@ interface HazardChallenge {
   }[];
 }
 
-const PIPELINE_ROUNDS: HazardChallenge[] = [
-  {
-    id: 1,
-    roundTitle: 'ROUND 01 // DATA DEPENDENCY HAZARD (RAW)',
-    badge: 'MODULE 6.2 // DATA HAZARD',
-    instructions: [
-      { id: 'I1', asm: 'INC [4000H]', stages: ['IF', 'ID', 'AG', 'OF', 'EX', 'WR'], highlight: true },
-      { id: 'I2', asm: 'MOV BL, [4000H]', stages: ['  ', 'IF', 'ID', 'AG', 'OF ⚠️', 'EX', 'WR'], highlight: true },
-      { id: 'I3', asm: 'ADD AL, BL', stages: ['  ', '  ', 'IF', 'ID', 'AG', 'OF', 'EX', 'WR'] },
-    ],
-    problemStatement:
-      'I2 (MOV BL, [4000H]) reaches Operand Fetch (OF) at Cycle 5 before I1 (INC [4000H]) has finished Writing Back (WR) the incremented value to [4000H] at Cycle 6!',
-    coaConceptNote:
-      'Data Dependency Hazard (Read-After-Write): Occurs when the destination of one instruction is used as the source operand of the next instruction.',
-    options: [
-      {
-        label: 'ENGAGE OPERAND FORWARDING + NOP BUBBLE',
-        subtext: 'Bypass stale memory read by forwarding I1 result & stalling 1 cycle',
-        isOptimal: true,
-        cpiImpact: 0.0,
-        scoreDelta: 250,
-        feedback: 'OPTIMAL! You prevented I2 from loading stale data at [4000H] while keeping the pipeline running smoothly.',
-        formula: 'RAW Resolved: I1 Execution Output -> I2 Operand Input',
-      },
-      {
-        label: 'FORCE IMMEDIATE SEQUENTIAL READ (NO STALL)',
-        subtext: 'Let I2 read [4000H] during Cycle 5 before I1 writes back',
-        isOptimal: false,
-        cpiImpact: 0.45,
-        scoreDelta: -75,
-        feedback: 'DATA CORRUPTION FAULT! Register BL received the old, un-incremented value of [4000H]!',
-        formula: 'Fault: OF(I2) occurred prior to WR(I1)',
-      },
-    ],
-  },
-  {
-    id: 2,
-    roundTitle: 'ROUND 02 // CONTROL / BRANCH HAZARD',
-    badge: 'MODULE 6.2 // CONTROL HAZARD',
-    instructions: [
-      { id: 'I1', asm: 'JMP Down', stages: ['IF', 'ID', 'EX (Jump!)'], highlight: true },
-      { id: 'I2', asm: 'INC BL (Sequential)', stages: ['  ', 'IF ⚠️', 'ID ⚠️', 'FLUSH'], highlight: true },
-      { id: 'I3', asm: 'MOV CL, DL (Sequential)', stages: ['  ', '  ', 'IF ⚠️', 'FLUSH'] },
-      { id: 'I4', asm: 'Down: DEC CH (Target)', stages: ['  ', '  ', '  ', 'IF', 'ID', 'EX', 'WR'], highlight: true },
-    ],
-    problemStatement:
-      'JMP Down jumps directly to "Down: DEC CH". However, the pipeline already prefetched and decoded sequential instructions INC BL and MOV CL, DL!',
-    coaConceptNote:
-      'Control Hazard: Unconditional/conditional branches break sequential flow. Solved by flushing wrong-path instructions and using Branch Prediction (Pentium).',
-    options: [
-      {
-        label: 'FLUSH WRONG-PATH FETCHES & ENGAGE BRANCH PREDICTION',
-        subtext: 'Discard prefetched INC BL / MOV CL, DL and predict target DEC CH',
-        isOptimal: true,
-        cpiImpact: 0.05,
-        scoreDelta: 250,
-        feedback: 'EXCELLENT! Wrong-path instructions were flushed and the Branch Target Buffer locked onto Down: DEC CH.',
-        formula: 'Control Hazard Cleared via Pipeline Flush + Branch Prediction',
-      },
-      {
-        label: 'ALLOW PREFETCHED INSTRUCTIONS TO COMPLETE WRITEBACK',
-        subtext: 'Let INC BL and MOV CL, DL finish before jumping to Down',
-        isOptimal: false,
-        cpiImpact: 0.6,
-        scoreDelta: -75,
-        feedback: 'CONTROL FAULT! Registers BL and CL were illegally overwritten by instructions that should have been skipped!',
-        formula: 'Fault: Unflushed Sequential Instructions Executed After Branch',
-      },
-    ],
-  },
-  {
-    id: 3,
-    roundTitle: 'ROUND 03 // PIPELINE SUB-STAGE OPTIMIZATION & BUS HAZARD',
-    badge: 'MODULE 6.3 // DR. GOSWAMI MODEL-4 PROBLEM',
-    instructions: [
-      { id: 'Design A', asm: 'IF(1) | D(1) | EX(4 Cycles)', stages: ['F', 'D', 'E', 'E', 'E', 'E'], highlight: true },
-      { id: 'Design B', asm: 'IF(1) | D(1) | Ex1(2) | Ex2(2)', stages: ['F', 'D', 'Ex1', 'Ex1', 'Ex2', 'Ex2'], highlight: true },
-    ],
-    problemStatement:
-      'A 1 GHz processor has IF = 1 cycle, D = 1 cycle, and a bottleneck Execution stage EX = 4 cycles (42 cycles for 10 instructions). How do you optimize this pipeline and prevent structural memory bus collisions?',
-    coaConceptNote:
-      'From Module 6.3 Model-4: Partitioning a slow 4-cycle Execution stage into two 2-cycle sub-stages (Ex1=2, Ex2=2) cuts 10-instruction execution from 42 cycles to 24 cycles, and Harvard split buses prevent structural fetch/data collisions!',
-    options: [
-      {
-        label: 'SPLIT EX(4) INTO Ex1(2)+Ex2(2) & USE HARVARD SPLIT BUS',
-        subtext: 'Reduces inter-instruction delay from 4 to 2 cycles + separate code/data buses',
-        isOptimal: true,
-        cpiImpact: -0.05,
-        scoreDelta: 300,
-        feedback: 'MASTER ARCHITECT! Total cycles for 10 instructions dropped from 42 to 24 cycles, and max operating frequency doubled from 0.25 GHz to 0.50 GHz!',
-        formula: 'Cycles = 6 + (10 - 1)×2 = 24 Cycles | f_max = 1GHz / 2 = 0.50 GHz',
-      },
-      {
-        label: 'KEEP SINGLE 4-CYCLE EX STAGE & SINGLE SHARED BUS',
-        subtext: 'Wait 4 cycles between instructions and stall IF during memory operand access',
-        isOptimal: false,
-        cpiImpact: 0.5,
-        scoreDelta: -75,
-        feedback: 'BOTTLENECK FAULT! The 4-cycle stage limits throughput to 42 cycles and causes structural bus hazards.',
-        formula: 'Unoptimized = 6 + (10 - 1)×4 = 42 Cycles (f_max = 0.25 GHz)',
-      },
-    ],
-  },
-];
+type PipelineChallenge = DiagramQuestion | McqQuestion;
+
+function buildChoices(correct: number, step: number): number[] {
+  const set = new Set<number>([correct]);
+  const offsets = [-2 * step, -step, step, 2 * step, 3 * step];
+  for (const off of offsets) {
+    if (set.size < 4 && correct + off > 0) {
+      set.add(correct + off);
+    }
+  }
+  return Array.from(set).sort((a, b) => a - b);
+}
+
+/**
+ * Generates 5 randomized Pipeline questions (3 Interactive Diagram + Math, 2 Hazard MCQs)
+ */
+function generateRandomizedPipelineQuestions(): PipelineChallenge[] {
+  const randPick = <T,>(arr: T[]): T =>
+    arr[Math.floor(Math.random() * arr.length)];
+
+  // QUESTION 1: Standard Multi-Cycle Pipeline Diagram & Clock Cycle Calculation
+  const q1If = randPick([1, 2]);
+  const q1D = 1;
+  const q1E = randPick([2, 3, 4]);
+  const q1N = randPick([10, 12, 15, 20]);
+  const q1Fmc = randPick([1, 2, 4]);
+  const q1C1 = q1If + q1D + q1E;
+  const q1Diff = Math.max(q1If, q1D, q1E);
+  const q1Total = q1C1 + (q1N - 1) * q1Diff;
+  const q1Fmax = `${(q1Fmc / q1Diff).toFixed(2)} GHz`;
+
+  // QUESTION 2: Sub-Stage Partitioned Pipeline (Model-4 Improvement)
+  const q2If = 2;
+  const q2D = 1;
+  const q2E = randPick([2, 3]); // After splitting a 4 or 6 cycle stage in half!
+  const q2N = randPick([20, 30, 50, 100]);
+  const q2Fmc = randPick([2, 3, 6]);
+  const q2C1 = q2If + q2D + q2E;
+  const q2Diff = Math.max(q2If, q2D, q2E);
+  const q2Total = q2C1 + (q2N - 1) * q2Diff;
+  const q2Fmax = `${(q2Fmc / q2Diff).toFixed(2)} GHz`;
+
+  // QUESTION 3: Pipeline Flush Interval Problem (Model-3 Problem)
+  const q3If = 1;
+  const q3D = 1;
+  const q3E = randPick([3, 4]);
+  const q3FlushK = randPick([5, 10]);
+  const q3Batches = randPick([3, 4]);
+  const q3N = q3FlushK * q3Batches;
+  const q3Fmc = randPick([2, 4]);
+  const q3C1 = q3If + q3D + q3E;
+  const q3Diff = Math.max(q3If, q3D, q3E);
+  const cyclesPerBatch = q3C1 + (q3FlushK - 1) * q3Diff;
+  const q3Total = cyclesPerBatch * q3Batches;
+  const q3Fmax = `${(q3Fmc / q3Diff).toFixed(2)} GHz`;
+
+  // Random hex address for MCQ 4
+  const randHex = randPick(['[2050H]', '[4000H]', '[8A00H]', '[3F10H]']);
+  const randReg = randPick(['BL', 'CL', 'DL']);
+
+  return [
+    {
+      kind: 'DIAGRAM',
+      id: 1,
+      title: 'QUESTION 01 // BUILD PIPELINE TIMING DIAGRAM & CYCLES',
+      badge: 'INTERACTIVE DIAGRAM BUILDER (1 OF 5)',
+      instructionsText: `Given: Fetch (IF) = ${q1If} cycle(s), Decode (D) = ${q1D} cycle(s), Execute (E) = ${q1E} cycle(s), Microcontroller Clock f_mc = ${q1Fmc} GHz, and N = ${q1N} instructions.`,
+      ifCycles: q1If,
+      dCycles: q1D,
+      eCycles: q1E,
+      totalInstructions: q1N,
+      fmcGHz: q1Fmc,
+      expectedShift: q1Diff,
+      expectedTotalCycles: q1Total,
+      expectedFmax: q1Fmax,
+      cycleChoices: buildChoices(q1Total, q1Diff),
+      freqChoices: Array.from(
+        new Set([
+          q1Fmax,
+          `${(q1Fmc / (q1Diff + 1)).toFixed(2)} GHz`,
+          `${q1Fmc.toFixed(2)} GHz`,
+          `${(q1Fmc / (q1C1 || 1)).toFixed(2)} GHz`,
+        ])
+      ),
+      formulaNote: `Total Cycles = C1 + (N - 1) × Δ = ${q1C1} + (${q1N} - 1) × ${q1Diff} = ${q1Total} Cycles | f_max = ${q1Fmc} GHz / ${q1Diff} = ${q1Fmax}`,
+    },
+    {
+      kind: 'DIAGRAM',
+      id: 2,
+      title: 'QUESTION 02 // HIGH-THROUGHPUT PIPELINE TIMING & SPEEDUP',
+      badge: 'INTERACTIVE DIAGRAM BUILDER (2 OF 5)',
+      instructionsText: `An optimized pipeline has Fetch (IF) = ${q2If} cycles, Decode (D) = ${q2D} cycle, Execute (E) = ${q2E} cycles, Clock f_mc = ${q2Fmc} GHz, and N = ${q2N} instructions.`,
+      ifCycles: q2If,
+      dCycles: q2D,
+      eCycles: q2E,
+      totalInstructions: q2N,
+      fmcGHz: q2Fmc,
+      expectedShift: q2Diff,
+      expectedTotalCycles: q2Total,
+      expectedFmax: q2Fmax,
+      cycleChoices: buildChoices(q2Total, q2Diff * 2),
+      freqChoices: Array.from(
+        new Set([
+          q2Fmax,
+          `${(q2Fmc / (q2Diff + 1)).toFixed(2)} GHz`,
+          `${(q2Fmc / 4).toFixed(2)} GHz`,
+          `${q2Fmc.toFixed(2)} GHz`,
+        ])
+      ),
+      formulaNote: `Total Cycles = ${q2C1} + (${q2N} - 1) × ${q2Diff} = ${q2Total} Cycles | f_max = ${q2Fmc} GHz / ${q2Diff} = ${q2Fmax}`,
+    },
+    {
+      kind: 'DIAGRAM',
+      id: 3,
+      title: `QUESTION 03 // PIPELINE FLUSH EVERY ${q3FlushK} INSTRUCTIONS`,
+      badge: 'INTERACTIVE DIAGRAM BUILDER (3 OF 5)',
+      instructionsText: `Given: IF = ${q3If} cycle, D = ${q3D} cycle, E = ${q3E} cycles, f_mc = ${q3Fmc} GHz. The pipeline is FLUSHED after every ${q3FlushK} instructions! Find total cycles for N = ${q3N} instructions (${q3Batches} batches of ${q3FlushK}).`,
+      ifCycles: q3If,
+      dCycles: q3D,
+      eCycles: q3E,
+      totalInstructions: q3N,
+      fmcGHz: q3Fmc,
+      flushInterval: q3FlushK,
+      expectedShift: q3Diff,
+      expectedTotalCycles: q3Total,
+      expectedFmax: q3Fmax,
+      cycleChoices: buildChoices(q3Total, q3C1),
+      freqChoices: Array.from(
+        new Set([
+          q3Fmax,
+          `${(q3Fmc / 2).toFixed(2)} GHz`,
+          `${(q3Fmc / (q3Diff + 1)).toFixed(2)} GHz`,
+          `${q3Fmc.toFixed(2)} GHz`,
+        ])
+      ),
+      formulaNote: `1 Batch (${q3FlushK} instr) = ${q3C1} + (${q3FlushK} - 1) × ${q3Diff} = ${cyclesPerBatch} Cycles. For ${q3Batches} batches: ${q3Batches} × ${cyclesPerBatch} = ${q3Total} Cycles!`,
+    },
+    {
+      kind: 'MCQ',
+      id: 4,
+      title: 'QUESTION 04 // DATA DEPENDENCY HAZARD (RAW)',
+      badge: 'HAZARD SCENARIO MCQ (4 OF 5)',
+      instructions: [
+        {
+          id: 'I1',
+          asm: `INC ${randHex}`,
+          stages: ['IF', 'ID', 'AG', 'OF', 'EX', 'WR'],
+          highlight: true,
+        },
+        {
+          id: 'I2',
+          asm: `MOV ${randReg}, ${randHex}`,
+          stages: ['  ', 'IF', 'ID', 'AG', 'OF ⚠️', 'EX', 'WR'],
+          highlight: true,
+        },
+        {
+          id: 'I3',
+          asm: `ADD AL, ${randReg}`,
+          stages: ['  ', '  ', 'IF', 'ID', 'AG', 'OF', 'EX', 'WR'],
+        },
+      ],
+      problemStatement: `Instruction I2 (MOV ${randReg}, ${randHex}) reaches Operand Fetch (OF) at Cycle 5 before I1 (INC ${randHex}) finishes Writing Back (WR) the updated value to ${randHex} at Cycle 6! What must the pipeline controller do?`,
+      coaConceptNote:
+        'A Read-After-Write (RAW) Data Dependency Hazard occurs when the destination of I1 is the source operand of I2.',
+      options: [
+        {
+          label: 'INSERT NOP BUBBLE / ENGAGE OPERAND FORWARDING',
+          subtext: `Delay or forward the updated result of ${randHex} from I1 before I2 executes`,
+          isOptimal: true,
+          cpiImpact: 0.0,
+          scoreDelta: 250,
+          feedback: `CORRECT! Forwarding/NOP prevents I2 from reading an un-incremented stale value from ${randHex}.`,
+          formula: `RAW Hazard Resolved: WR(I1) -> OF(I2) Synchronized`,
+        },
+        {
+          label: 'READ MEMORY IMMEDIATELY WITHOUT STALLING',
+          subtext: `Allow I2 to fetch ${randHex} at Cycle 5 before I1 writes back at Cycle 6`,
+          isOptimal: false,
+          cpiImpact: 0.45,
+          scoreDelta: -50,
+          feedback: `DATA HAZARD FAULT! ${randReg} loaded the old, stale value of ${randHex} before I1 finished writing!`,
+          formula: `Fault: OF(I2) executed before WR(I1)`,
+        },
+      ],
+    },
+    {
+      kind: 'MCQ',
+      id: 5,
+      title: 'QUESTION 05 // CONTROL / BRANCH HAZARD RESOLUTION',
+      badge: 'HAZARD SCENARIO MCQ (5 OF 5)',
+      instructions: [
+        {
+          id: 'I1',
+          asm: 'JMP Down',
+          stages: ['IF', 'ID', 'EX (Branch Taken!)'],
+          highlight: true,
+        },
+        {
+          id: 'I2',
+          asm: `INC ${randReg} (Sequential)`,
+          stages: ['  ', 'IF ⚠️', 'ID ⚠️', 'FLUSH'],
+          highlight: true,
+        },
+        {
+          id: 'I3',
+          asm: 'MOV CL, DL (Sequential)',
+          stages: ['  ', '  ', 'IF ⚠️', 'FLUSH'],
+        },
+        {
+          id: 'I4',
+          asm: 'Down: DEC CH (Target)',
+          stages: ['  ', '  ', '  ', 'IF', 'ID', 'EX', 'WR'],
+          highlight: true,
+        },
+      ],
+      problemStatement:
+        'JMP Down jumps to "Down: DEC CH". However, while JMP Down was being decoded, the pipeline already fetched sequential instructions I2 and I3! How do you resolve this Control Hazard?',
+      coaConceptNote:
+        'Unconditional/conditional branches break sequential instruction flow, requiring wrong-path instructions to be flushed and Branch Prediction to be used.',
+      options: [
+        {
+          label: 'FLUSH WRONG-PATH INSTRUCTIONS & USE BRANCH PREDICTION',
+          subtext: `Discard prefetched I2 (INC ${randReg}) & I3, and fetch from target "Down: DEC CH"`,
+          isOptimal: true,
+          cpiImpact: 0.05,
+          scoreDelta: 250,
+          feedback:
+            'EXCELLENT! Flushing the wrong-path instructions and engaging the Branch Target Buffer prevents illegal register updates.',
+          formula: 'Control Hazard Resolved via Pipeline Flush + Branch Prediction',
+        },
+        {
+          label: 'LET SEQUENTIAL INSTRUCTIONS FINISH EXECUTION BEFORE JUMPING',
+          subtext: `Commit INC ${randReg} and MOV CL, DL to registers before branching to Down`,
+          isOptimal: false,
+          cpiImpact: 0.6,
+          scoreDelta: -50,
+          feedback:
+            'CONTROL FAULT! Instructions after an unconditional jump must never be committed to architectural registers!',
+          formula: 'Fault: Wrong-Path Instructions Committed',
+        },
+      ],
+    },
+  ];
+}
+
+function buildStageArray(ifC: number, dC: number, eC: number): string[] {
+  return [
+    ...Array(ifC).fill('F'),
+    ...Array(dC).fill('D'),
+    ...Array(eC).fill('E'),
+  ];
+}
 
 export default function PipelineGame() {
-  const { cpi, updateCPI, addScore, recordMiss, setPhase } = useGameStore();
+  const {
+    cpi,
+    updateCPI,
+    addScore,
+    recordMiss,
+    setPhase,
+    isPipelineCompleted,
+    completePipelinePhase,
+  } = useGameStore();
 
-  const [roundIdx, setRoundIdx] = useState(0);
+  const [questions] = useState<PipelineChallenge[]>(() =>
+    generateRandomizedPipelineQuestions()
+  );
+  const [qIdx, setQIdx] = useState(0);
+
+  // Interactive Diagram Builder state for Questions 1–3
+  // I1 always starts at Cycle 0 (1-indexed Cycle 1). Player controls start cycle of I2 and I3!
+  const [i2Start, setI2Start] = useState<number>(1);
+  const [i3Start, setI3Start] = useState<number>(2);
+  const [selectedCycles, setSelectedCycles] = useState<number | null>(null);
+  const [selectedFreq, setSelectedFreq] = useState<string | null>(null);
+
   const [feedbackBanner, setFeedbackBanner] = useState<{
     text: string;
     formula: string;
     good: boolean;
   } | null>(null);
 
-  const [numInstructions, setNumInstructions] = useState(10);
-  const [ifCycles, setIfCycles] = useState(2);
-  const [idCycles, setIdCycles] = useState(1);
-  const [exCycles, setExCycles] = useState(3);
+  const currentQ = questions[qIdx];
 
-  const currentRound = PIPELINE_ROUNDS[roundIdx];
+  // Check if the player's interactive diagram alignment has any stage collisions!
+  const diagramValidation = useMemo(() => {
+    if (currentQ.kind !== 'DIAGRAM') return null;
+    const stages = buildStageArray(
+      currentQ.ifCycles,
+      currentQ.dCycles,
+      currentQ.eCycles
+    );
 
-  const singleInstrCycles = ifCycles + idCycles + exCycles;
-  const maxStageDiff = Math.max(ifCycles, idCycles, exCycles);
-  const nonPipelinedCycles = numInstructions * singleInstrCycles;
-  const pipelinedCycles = singleInstrCycles + (numInstructions - 1) * maxStageDiff;
-  const speedupRatio = (nonPipelinedCycles / pipelinedCycles).toFixed(2);
-  const maxOpFreqGHz = (1 / maxStageDiff).toFixed(2);
+    const rowStarts = [0, i2Start, i3Start];
+    const collisionCols = new Set<number>();
 
-  const handleOptionSelect = (option: HazardChallenge['options'][0]) => {
+    // Check every clock cycle column (0..19) for same-stage hardware resource collision (F vs F, D vs D, E vs E)
+    for (let col = 0; col < 20; col++) {
+      const activeStagesInCol: string[] = [];
+      for (let r = 0; r < 3; r++) {
+        const idxInInstr = col - rowStarts[r];
+        if (idxInInstr >= 0 && idxInInstr < stages.length) {
+          const st = stages[idxInInstr];
+          if (activeStagesInCol.includes(st)) {
+            collisionCols.add(col);
+          }
+          activeStagesInCol.push(st);
+        }
+      }
+    }
+
+    const isExactCompactAlignment =
+      i2Start === currentQ.expectedShift &&
+      i3Start === currentQ.expectedShift * 2 &&
+      collisionCols.size === 0;
+
+    return {
+      stages,
+      collisionCols,
+      isExactCompactAlignment,
+    };
+  }, [currentQ, i2Start, i3Start]);
+
+  const handleVerifyDiagramQuestion = () => {
+    if (currentQ.kind !== 'DIAGRAM' || !diagramValidation) return;
+
+    if (!diagramValidation.isExactCompactAlignment) {
+      sound.playFault();
+      recordMiss(
+        `Diagram Alignment Fault! Each instruction must start Δ = ${currentQ.expectedShift} clock cycle(s) after the previous one so that the ${currentQ.eCycles}-cycle Execute stage never collides without wasting idle cycles!`,
+        `Set I2 Start = Cycle ${1 + currentQ.expectedShift} & I3 Start = Cycle ${1 + currentQ.expectedShift * 2}`
+      );
+      setFeedbackBanner({
+        text: `❌ DIAGRAM ALIGNMENT FAULT: Shift I2 to start at Cycle ${
+          1 + currentQ.expectedShift
+        } and I3 to start at Cycle ${
+          1 + currentQ.expectedShift * 2
+        } so stages don't collide in red!`,
+        formula: `Δ = max(${currentQ.ifCycles}, ${currentQ.dCycles}, ${currentQ.eCycles}) = ${currentQ.expectedShift} Cycles between instructions`,
+        good: false,
+      });
+      return;
+    }
+
+    if (
+      selectedCycles !== currentQ.expectedTotalCycles ||
+      selectedFreq !== currentQ.expectedFmax
+    ) {
+      sound.playFault();
+      recordMiss(
+        'Calculation Mismatch! Check the Total Clock Cycles and Max Operating Frequency formulas.',
+        currentQ.formulaNote
+      );
+      setFeedbackBanner({
+        text: '❌ MATH MISMATCH (-50 PTS): Your diagram is aligned, but your Total Clock Cycles or Max Frequency selection is incorrect!',
+        formula: currentQ.formulaNote,
+        good: false,
+      });
+      return;
+    }
+
+    sound.playHit();
+    addScore(300);
+    setFeedbackBanner({
+      text: '✅ PERFECT PIPELINE DIAGRAM & TELEMETRY CALCULATION (+300 PTS)!',
+      formula: currentQ.formulaNote,
+      good: true,
+    });
+  };
+
+  const handleMcqSelect = (option: McqQuestion['options'][0]) => {
     updateCPI(option.cpiImpact);
-
     if (option.isOptimal) {
       sound.playHit();
       addScore(option.scoreDelta);
@@ -180,286 +441,374 @@ export default function PipelineGame() {
     }
   };
 
-  const handleNextRound = () => {
+  const handleNextQuestion = () => {
     setFeedbackBanner(null);
-    if (roundIdx + 1 < PIPELINE_ROUNDS.length) {
-      setRoundIdx(roundIdx + 1);
+    setI2Start(1);
+    setI3Start(2);
+    setSelectedCycles(null);
+    setSelectedFreq(null);
+
+    if (qIdx + 1 < questions.length) {
+      setQIdx(qIdx + 1);
     } else {
+      completePipelinePhase();
       setPhase('LEADERBOARD');
     }
   };
 
   return (
     <section className="max-w-6xl mx-auto w-full px-4 py-6 font-mono flex flex-col gap-6">
+      {/* Top Progress Bar */}
       <div className="bg-slate-900/90 border border-emerald-500/40 p-4 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-emerald-500 text-slate-950 uppercase">
-            {currentRound.badge}
+          <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded bg-emerald-500 text-slate-950 uppercase">
+            {currentQ.badge}
           </span>
           <h1 className="text-lg md:text-xl font-extrabold text-white mt-1">
-            {currentRound.roundTitle}
+            {currentQ.title}
           </h1>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="bg-slate-950 px-4 py-2 rounded-lg border border-cyan-500/40 text-right">
-            <div className="text-[10px] text-slate-400 uppercase">Processor CPI</div>
-            <div className="text-lg font-extrabold text-cyan-300">{cpi.toFixed(2)}</div>
+        <div className="flex items-center gap-2">
+          {questions.map((q, idx) => (
+            <div
+              key={q.id}
+              className={`px-3 py-1.5 rounded text-xs font-bold border ${
+                idx === qIdx
+                  ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-extrabold'
+                  : idx < qIdx
+                  ? 'bg-slate-900 text-emerald-400 border-emerald-500/30'
+                  : 'bg-slate-950 text-slate-500 border-slate-800'
+              }`}
+            >
+              {idx < qIdx ? '✓' : `Q${idx + 1}`}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* =====================================================================
+          QUESTIONS 1–3: INTERACTIVE PIPELINE DIAGRAM BUILDER + MATH
+         ===================================================================== */}
+      {currentQ.kind === 'DIAGRAM' && diagramValidation && (
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-6">
+          {/* Clear How-To-Play Instructions Box */}
+          <div className="p-4 rounded-xl bg-emerald-950/30 border border-emerald-500/40 space-y-2">
+            <div className="text-xs font-extrabold text-emerald-300 uppercase tracking-wider">
+              📋 WHAT YOU NEED TO DO (2 STEPS):
+            </div>
+            <p className="text-xs md:text-sm text-white font-bold">
+              {currentQ.instructionsText}
+            </p>
+            <ol className="list-decimal list-inside text-xs text-slate-300 space-y-1">
+              <li>
+                <strong>Step 1 (Build the Diagram):</strong> Use the{' '}
+                <span className="text-emerald-300 font-bold">[◀ LEFT] / [RIGHT ▶]</span>{' '}
+                buttons (or click a cycle column) to shift <strong>Instruction 2 (I2)</strong> and{' '}
+                <strong>Instruction 3 (I3)</strong> so no hardware stages collide in red!
+              </li>
+              <li>
+                <strong>Step 2 (Calculate Telemetry):</strong> Select the correct{' '}
+                <strong>Total Clock Cycles</strong> for all {currentQ.totalInstructions}{' '}
+                instructions and the <strong>Max Operating Frequency (f_max)</strong> below, then click{' '}
+                <strong>VERIFY &amp; LOCK IN</strong>.
+              </li>
+            </ol>
           </div>
 
-          <div className="flex gap-1.5">
-            {PIPELINE_ROUNDS.map((r, idx) => (
-              <button
-                key={r.id}
-                onClick={() => {
-                  setRoundIdx(idx);
-                  setFeedbackBanner(null);
-                }}
-                className={`px-3 py-1.5 rounded text-xs font-bold border cursor-pointer ${
-                  roundIdx === idx
-                    ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-extrabold'
-                    : 'bg-slate-950 text-slate-400 border-slate-800'
+          {/* Interactive Pipeline Timing Grid */}
+          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 overflow-x-auto">
+            <div className="flex items-center justify-between mb-3 min-w-[720px]">
+              <span className="text-xs font-bold text-emerald-400 uppercase">
+                // INTERACTIVE PIPELINE TIMING DIAGRAM (CLOCK CYCLES 1–16)
+              </span>
+              <span
+                className={`text-xs font-extrabold px-2.5 py-1 rounded ${
+                  diagramValidation.isExactCompactAlignment
+                    ? 'bg-emerald-500/20 border border-emerald-400 text-emerald-300'
+                    : 'bg-rose-500/20 border border-rose-500 text-rose-300'
                 }`}
               >
-                R{idx + 1}
+                {diagramValidation.isExactCompactAlignment
+                  ? '✓ VALID PIPELINE ALIGNMENT (ZERO COLLISIONS)'
+                  : '⚠️ ALIGNMENT NEEDED: SHIFT I2 & I3 UNTIL RED COLLISIONS CLEAR'}
+              </span>
+            </div>
+
+            <div className="min-w-[720px] space-y-2">
+              {/* Clock Cycle Header Row */}
+              <div className="grid grid-cols-20 gap-1 text-[10px] text-slate-400 font-bold text-center">
+                <div className="col-span-4 text-left pl-2">INSTRUCTION</div>
+                {Array.from({ length: 16 }, (_, c) => (
+                  <div
+                    key={c}
+                    className={`py-1 rounded ${
+                      diagramValidation.collisionCols.has(c)
+                        ? 'bg-rose-500 text-slate-950 font-extrabold'
+                        : 'bg-slate-900'
+                    }`}
+                  >
+                    C{c + 1}
+                  </div>
+                ))}
+              </div>
+
+              {/* Rows for I1, I2, I3 */}
+              {[
+                { label: 'I1 (Fixed)', start: 0, setStart: null },
+                { label: 'I2 (Shiftable)', start: i2Start, setStart: setI2Start },
+                { label: 'I3 (Shiftable)', start: i3Start, setStart: setI3Start },
+              ].map((row, rIdx) => (
+                <div
+                  key={row.label}
+                  className="grid grid-cols-20 gap-1 items-center"
+                >
+                  {/* Row Control Header */}
+                  <div className="col-span-4 flex items-center justify-between bg-slate-900 px-2.5 py-1.5 rounded border border-slate-800 text-xs">
+                    <span className="font-bold text-white">{row.label}</span>
+                    {row.setStart ? (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => row.setStart!(Math.max(1, row.start - 1))}
+                          className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 font-extrabold text-[10px] cursor-pointer"
+                          title="Shift Left 1 Cycle"
+                        >
+                          ◀
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => row.setStart!(Math.min(10, row.start + 1))}
+                          className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 font-extrabold text-[10px] cursor-pointer"
+                          title="Shift Right 1 Cycle"
+                        >
+                          ▶
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-[10px] text-emerald-400">Start: C1</span>
+                    )}
+                  </div>
+
+                  {/* 16 Clock Cycle Cells */}
+                  {Array.from({ length: 16 }, (_, col) => {
+                    const stageOffset = col - row.start;
+                    const stageLetter =
+                      stageOffset >= 0 &&
+                      stageOffset < diagramValidation.stages.length
+                        ? diagramValidation.stages[stageOffset]
+                        : null;
+                    const isCollision =
+                      stageLetter !== null &&
+                      diagramValidation.collisionCols.has(col);
+
+                    return (
+                      <div
+                        key={col}
+                        onClick={() => {
+                          if (row.setStart && col >= 1 && col <= 10) {
+                            row.setStart(col);
+                          }
+                        }}
+                        className={`h-9 rounded flex items-center justify-center text-xs font-extrabold border transition-all ${
+                          row.setStart ? 'cursor-pointer' : ''
+                        } ${
+                          stageLetter === null
+                            ? 'bg-slate-950/60 border-slate-900 text-slate-700 hover:border-slate-700'
+                            : isCollision
+                            ? 'bg-rose-950 border-rose-500 text-rose-300 animate-pulse'
+                            : stageLetter === 'F'
+                            ? 'bg-cyan-950/80 border-cyan-500/60 text-cyan-300'
+                            : stageLetter === 'D'
+                            ? 'bg-amber-950/80 border-amber-500/60 text-amber-300'
+                            : 'bg-emerald-950/80 border-emerald-500/60 text-emerald-300'
+                        }`}
+                      >
+                        {stageLetter || '·'}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Step 2: Calculation Selectors */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+            {/* Total Clock Cycles Selector */}
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+              <div className="text-xs font-bold text-emerald-400 uppercase mb-1">
+                2A. Select Total Clock Cycles (for N = {currentQ.totalInstructions} Instructions)
+              </div>
+              <p className="text-[11px] text-slate-400 mb-3">
+                {currentQ.flushInterval
+                  ? `Hint: Calculate cycles for 1 batch of ${currentQ.flushInterval} instructions, then multiply by number of batches!`
+                  : 'Hint: Total Cycles = (Cycles for 1st Instruction) + (N - 1) × (Cycle shift Δ between instructions)'}
+              </p>
+              <div className="grid grid-cols-2 gap-2.5">
+                {currentQ.cycleChoices.map((cyc) => (
+                  <button
+                    key={cyc}
+                    type="button"
+                    onClick={() => setSelectedCycles(cyc)}
+                    className={`py-2.5 px-3 rounded-lg text-xs font-extrabold border transition-all cursor-pointer ${
+                      selectedCycles === cyc
+                        ? 'bg-emerald-500 text-slate-950 border-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.4)]'
+                        : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-emerald-500/50'
+                    }`}
+                  >
+                    {cyc} Clock Cycles
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Max Operating Frequency Selector */}
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+              <div className="text-xs font-bold text-amber-300 uppercase mb-1">
+                2B. Select Max Operating Frequency (f_max)
+              </div>
+              <p className="text-[11px] text-slate-400 mb-3">
+                Hint: f_max = f_mc ({currentQ.fmcGHz} GHz) ÷ (Max cycle difference Δ between two instructions)
+              </p>
+              <div className="grid grid-cols-2 gap-2.5">
+                {currentQ.freqChoices.map((freq) => (
+                  <button
+                    key={freq}
+                    type="button"
+                    onClick={() => setSelectedFreq(freq)}
+                    className={`py-2.5 px-3 rounded-lg text-xs font-extrabold border transition-all cursor-pointer ${
+                      selectedFreq === freq
+                        ? 'bg-amber-400 text-slate-950 border-amber-200 shadow-[0_0_15px_rgba(251,191,36,0.4)]'
+                        : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-amber-400/50'
+                    }`}
+                  >
+                    {freq}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Verify Button */}
+          {!feedbackBanner?.good && (
+            <button
+              type="button"
+              onClick={handleVerifyDiagramQuestion}
+              className="w-full py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs tracking-wider shadow-[0_0_25px_rgba(16,185,129,0.35)] cursor-pointer"
+            >
+              VERIFY DIAGRAM ALIGNMENT &amp; CALCULATIONS &rarr;
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* =====================================================================
+          QUESTIONS 4–5: PIPELINE HAZARD RESOLUTION MCQs
+         ===================================================================== */}
+      {currentQ.kind === 'MCQ' && (
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-5">
+          <div className="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-500/40 text-xs text-emerald-200">
+            <strong>📋 WHAT YOU NEED TO DO:</strong> Inspect the assembly instructions on the pipeline timing diagram
+            below, identify the cause of the red <span className="text-rose-400 font-bold">⚠️ HAZARD</span>, and click
+            the correct architectural solution!
+          </div>
+
+          <div className="space-y-2.5 bg-slate-950 p-4 rounded-xl border border-slate-800 overflow-x-auto">
+            {currentQ.instructions.map((inst) => (
+              <div key={inst.id} className="flex items-center gap-3 min-w-[460px]">
+                <div
+                  className={`w-48 px-2.5 py-1.5 rounded text-xs font-bold border truncate ${
+                    inst.highlight
+                      ? 'bg-amber-500/15 border-amber-400/50 text-amber-200'
+                      : 'bg-slate-900 border-slate-800 text-slate-300'
+                  }`}
+                >
+                  <span className="text-emerald-400 mr-1.5">{inst.id}:</span>
+                  {inst.asm}
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  {inst.stages.map((st, sIdx) => (
+                    <div
+                      key={sIdx}
+                      className={`px-2.5 py-1.5 rounded text-xs font-extrabold border text-center min-w-[44px] ${
+                        st.trim() === ''
+                          ? 'border-transparent text-transparent'
+                          : st.includes('⚠️') || st === 'FLUSH'
+                          ? 'bg-rose-950/80 border-rose-500 text-rose-300 animate-pulse'
+                          : 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
+                      }`}
+                    >
+                      {st}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="p-3.5 rounded-lg bg-rose-950/25 border border-rose-500/40 text-xs text-rose-100 leading-relaxed">
+            <strong className="text-rose-400 uppercase block mb-1">
+              ⚠️ ACTIVE PIPELINE HAZARD DETECTED:
+            </strong>
+            {currentQ.problemStatement}
+          </div>
+
+          <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800 text-xs text-slate-300">
+            <strong className="text-emerald-400">COA Architecture Principle: </strong>
+            {currentQ.coaConceptNote}
+          </div>
+
+          <div className="grid grid-cols-1 gap-3">
+            {currentQ.options.map((opt, idx) => (
+              <button
+                key={idx}
+                onClick={() => handleMcqSelect(opt)}
+                className="text-left p-4 rounded-xl bg-slate-950 hover:bg-emerald-950/40 border-2 border-emerald-500/40 hover:border-emerald-400 transition-all cursor-pointer group"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs md:text-sm font-extrabold text-emerald-300 group-hover:text-white">
+                    [{idx + 1}] {opt.label}
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-bold">
+                    EXECUTE &rarr;
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-1">{opt.subtext}</p>
               </button>
             ))}
           </div>
         </div>
-      </div>
+      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* LEFT: Pipeline Hazard Conveyor */}
-        <div className="lg:col-span-7 bg-slate-900/80 border border-slate-800 rounded-xl p-5 flex flex-col justify-between">
-          <div>
-            <div className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-3">
-              // INSTRUCTION PIPELINE TIMING DIAGRAM
-            </div>
-
-            <div className="space-y-2.5 bg-slate-950 p-4 rounded-xl border border-slate-800 overflow-x-auto">
-              {currentRound.instructions.map((inst) => (
-                <div key={inst.id} className="flex items-center gap-3 min-w-[460px]">
-                  <div
-                    className={`w-48 px-2.5 py-1.5 rounded text-xs font-bold border truncate ${
-                      inst.highlight
-                        ? 'bg-amber-500/15 border-amber-400/50 text-amber-200'
-                        : 'bg-slate-900 border-slate-800 text-slate-300'
-                    }`}
-                  >
-                    <span className="text-emerald-400 mr-1.5">{inst.id}:</span>
-                    {inst.asm}
-                  </div>
-
-                  <div className="flex items-center gap-1.5">
-                    {inst.stages.map((st, sIdx) => (
-                      <motion.div
-                        key={sIdx}
-                        initial={{ opacity: 0, x: -8 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: sIdx * 0.05 }}
-                        className={`px-2.5 py-1.5 rounded text-xs font-extrabold border text-center min-w-[44px] ${
-                          st.trim() === ''
-                            ? 'border-transparent text-transparent'
-                            : st.includes('⚠️') || st === 'FLUSH'
-                            ? 'bg-rose-950/80 border-rose-500 text-rose-300 animate-pulse'
-                            : 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
-                        }`}
-                      >
-                        {st}
-                      </motion.div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-4 p-3.5 rounded-lg bg-rose-950/25 border border-rose-500/40 text-xs text-rose-100 leading-relaxed">
-              <strong className="text-rose-400 uppercase block mb-1">
-                ⚠️ ACTIVE PIPELINE HAZARD DETECTED:
-              </strong>
-              {currentRound.problemStatement}
-            </div>
-
-            <div className="mt-3 p-3 rounded-lg bg-slate-950/80 border border-slate-800 text-xs text-slate-300">
-              <strong className="text-emerald-400">COA Architecture Note: </strong>
-              {currentRound.coaConceptNote}
-            </div>
-
-            <div className="mt-5 grid grid-cols-1 gap-3">
-              {currentRound.options.map((opt, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => handleOptionSelect(opt)}
-                  className="text-left p-4 rounded-xl bg-slate-950 hover:bg-emerald-950/40 border-2 border-emerald-500/40 hover:border-emerald-400 transition-all cursor-pointer group"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs md:text-sm font-extrabold text-emerald-300 group-hover:text-white">
-                      [{idx + 1}] {opt.label}
-                    </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-bold">
-                      EXECUTE &rarr;
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-400 mt-1">{opt.subtext}</p>
-                </button>
-              ))}
-            </div>
+      {/* Feedback Banner & Next Question Button */}
+      {feedbackBanner && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`p-4 rounded-xl border-2 ${
+            feedbackBanner.good
+              ? 'bg-emerald-950/70 border-emerald-400 text-emerald-100'
+              : 'bg-rose-950/70 border-rose-500 text-rose-100'
+          }`}
+        >
+          <div className="text-xs font-bold leading-relaxed">{feedbackBanner.text}</div>
+          <div className="mt-2 p-2 rounded bg-slate-950 text-center text-xs font-extrabold text-amber-300">
+            {feedbackBanner.formula}
           </div>
-
-          {feedbackBanner && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={`mt-5 p-4 rounded-xl border-2 ${
-                feedbackBanner.good
-                  ? 'bg-emerald-950/70 border-emerald-400 text-emerald-100'
-                  : 'bg-rose-950/70 border-rose-500 text-rose-100'
-              }`}
+          {feedbackBanner.good && (
+            <button
+              onClick={handleNextQuestion}
+              className="mt-3 w-full py-3 rounded-lg bg-emerald-400 text-slate-950 font-extrabold text-xs hover:bg-emerald-300 cursor-pointer"
             >
-              <div className="text-xs font-bold leading-relaxed">{feedbackBanner.text}</div>
-              <div className="mt-2 p-2 rounded bg-slate-950 text-center text-xs font-extrabold text-amber-300">
-                {feedbackBanner.formula}
-              </div>
-              {feedbackBanner.good && (
-                <button
-                  onClick={handleNextRound}
-                  className="mt-3 w-full py-2.5 rounded-lg bg-emerald-400 text-slate-950 font-extrabold text-xs hover:bg-emerald-300 cursor-pointer"
-                >
-                  {roundIdx + 1 < PIPELINE_ROUNDS.length
-                    ? 'NEXT PIPELINE CHALLENGE →'
-                    : 'COMPLETE REBOOT & AUTO-SUBMIT TO LEADERBOARD →'}
-                </button>
-              )}
-            </motion.div>
+              {qIdx + 1 < questions.length
+                ? `PROCEED TO QUESTION ${qIdx + 2} OF ${questions.length} →`
+                : 'COMPLETE SYSTEM REBOOT & VIEW LIVE LEADERBOARD →'}
+            </button>
           )}
-        </div>
-
-        {/* RIGHT: Module 6.3 Pipeline Calculator */}
-        <div className="lg:col-span-5 bg-slate-900/80 border border-emerald-500/30 rounded-xl p-5 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-4">
-              <span className="text-xs font-bold text-emerald-400 uppercase">
-                // MODULE 6.3 PIPELINE LAB SIMULATOR
-              </span>
-              <span className="text-[10px] text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-400/30">
-                f_mc = 1 GHz
-              </span>
-            </div>
-
-            <div className="space-y-3 bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs">
-              <div>
-                <div className="flex justify-between mb-1">
-                  <span className="text-slate-300">Instructions (N):</span>
-                  <span className="font-bold text-emerald-400">{numInstructions}</span>
-                </div>
-                <input
-                  type="range"
-                  min={4}
-                  max={100}
-                  value={numInstructions}
-                  onChange={(e) => setNumInstructions(Number(e.target.value))}
-                  className="w-full accent-emerald-400 cursor-pointer"
-                />
-              </div>
-
-              <div className="grid grid-cols-3 gap-2 pt-2">
-                <div className="bg-slate-900 p-2 rounded border border-slate-800 text-center">
-                  <div className="text-[10px] text-slate-400">Fetch (IF)</div>
-                  <div className="text-sm font-extrabold text-white my-1">{ifCycles} cyc</div>
-                  <div className="flex justify-center gap-1">
-                    <button
-                      onClick={() => setIfCycles(Math.max(1, ifCycles - 1))}
-                      className="px-2 bg-slate-800 rounded cursor-pointer"
-                    >
-                      -
-                    </button>
-                    <button
-                      onClick={() => setIfCycles(Math.min(4, ifCycles + 1))}
-                      className="px-2 bg-slate-800 rounded cursor-pointer"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-
-                <div className="bg-slate-900 p-2 rounded border border-slate-800 text-center">
-                  <div className="text-[10px] text-slate-400">Decode (D)</div>
-                  <div className="text-sm font-extrabold text-white my-1">{idCycles} cyc</div>
-                  <div className="flex justify-center gap-1">
-                    <button
-                      onClick={() => setIdCycles(Math.max(1, idCycles - 1))}
-                      className="px-2 bg-slate-800 rounded cursor-pointer"
-                    >
-                      -
-                    </button>
-                    <button
-                      onClick={() => setIdCycles(Math.min(4, idCycles + 1))}
-                      className="px-2 bg-slate-800 rounded cursor-pointer"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-
-                <div className="bg-slate-900 p-2 rounded border border-slate-800 text-center">
-                  <div className="text-[10px] text-slate-400">Execute (E)</div>
-                  <div className="text-sm font-extrabold text-amber-300 my-1">{exCycles} cyc</div>
-                  <div className="flex justify-center gap-1">
-                    <button
-                      onClick={() => setExCycles(Math.max(1, exCycles - 1))}
-                      className="px-2 bg-slate-800 rounded cursor-pointer"
-                    >
-                      -
-                    </button>
-                    <button
-                      onClick={() => setExCycles(Math.min(6, exCycles + 1))}
-                      className="px-2 bg-slate-800 rounded cursor-pointer"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
-              <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
-                <div className="text-[10px] text-slate-400 uppercase">Non-Pipelined</div>
-                <div className="text-lg font-extrabold text-rose-400 mt-0.5">
-                  {nonPipelinedCycles} <span className="text-[10px]">cyc</span>
-                </div>
-                <div className="text-[10px] text-slate-500 mt-0.5">
-                  {numInstructions} × {singleInstrCycles}
-                </div>
-              </div>
-
-              <div className="bg-slate-950 p-3 rounded-lg border border-emerald-500/40">
-                <div className="text-[10px] text-slate-400 uppercase">Pipelined</div>
-                <div className="text-lg font-extrabold text-emerald-400 mt-0.5">
-                  {pipelinedCycles} <span className="text-[10px]">cyc</span>
-                </div>
-                <div className="text-[10px] text-slate-500 mt-0.5">
-                  {singleInstrCycles} + ({numInstructions}-1)×{maxStageDiff}
-                </div>
-              </div>
-
-              <div className="bg-slate-950 p-3 rounded-lg border border-cyan-500/30">
-                <div className="text-[10px] text-slate-400 uppercase">Speedup Ratio</div>
-                <div className="text-lg font-extrabold text-cyan-300 mt-0.5">
-                  {speedupRatio}x
-                </div>
-              </div>
-
-              <div className="bg-slate-950 p-3 rounded-lg border border-amber-500/30">
-                <div className="text-[10px] text-slate-400 uppercase">Max Op Freq</div>
-                <div className="text-lg font-extrabold text-amber-300 mt-0.5">
-                  {maxOpFreqGHz} GHz
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+        </motion.div>
+      )}
     </section>
   );
 }

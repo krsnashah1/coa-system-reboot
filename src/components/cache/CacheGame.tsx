@@ -1,7 +1,7 @@
 // src/components/cache/CacheGame.tsx
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useGameStore, CacheMappingMode } from '@/store/gameStore';
 import {
@@ -23,32 +23,76 @@ interface LevelScenario {
   waysPerSet: number;
 }
 
-const CACHE_LEVELS: LevelScenario[] = [
-  {
-    level: 1,
-    mode: 'DIRECT',
-    title: 'LEVEL 01 // DIRECT MAPPING PROTOCOL',
-    subtitle: 'Route each Main Memory block using Line = Block mod 4. Watch for Conflict Thrashing!',
-    sequence: [0, 1, 4, 4, 7, 1, 8, 4],
-    waysPerSet: 1,
-  },
-  {
-    level: 2,
-    mode: 'ASSOCIATIVE',
-    title: 'LEVEL 02 // FULLY ASSOCIATIVE + LRU',
-    subtitle: 'Place blocks in ANY empty line! When all 4 lines are full, evict the LRU (OLDEST) block.',
-    sequence: [0, 4, 8, 12, 0, 2, 4, 6],
-    waysPerSet: 4,
-  },
-  {
-    level: 3,
-    mode: 'SET_ASSOCIATIVE',
-    title: 'LEVEL 03 // 2-WAY SET-ASSOCIATIVE MAPPING',
-    subtitle: '4 Lines divided into 2 Sets (Set = Block mod 2). Fill free ways first, then evict Set LRU!',
-    sequence: [2, 6, 3, 2, 10, 5, 1, 6],
-    waysPerSet: 2,
-  },
-];
+/**
+ * Generates randomized, pedagogically valid 8-block request sequences for each level
+ * so teammates cannot memorize or copy answers!
+ */
+function generateRandomizedLevels(): LevelScenario[] {
+  const randInt = (min: number, max: number) =>
+    Math.floor(Math.random() * (max - min + 1)) + min;
+
+  // LEVEL 1: Direct Mapping (4 lines)
+  // Pick 3 distinct remainders (rA, rB, rC), include repeat hits and modulo-4 conflict replacements
+  const remPool = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
+  const bA1 = remPool[0] + 4 * randInt(0, 1);
+  const bB1 = remPool[1] + 4 * randInt(0, 2);
+  const bA2 = remPool[0] + 4 * randInt(2, 3); // Collides with bA1 on Line remPool[0]
+  const bC1 = remPool[2] + 4 * randInt(0, 3);
+  const bB2 = (remPool[1] + 4 * ((Math.floor(bB1 / 4) + 1) % 4)) % 16; // Collides with bB1
+  const directSeq = [bA1, bB1, bA1, bA2, bC1, bB1, bB2, bA2];
+
+  // LEVEL 2: Fully Associative (4 lines + LRU)
+  // Pick 6 unique blocks (0..15): first 4 fill the cache, 5th hits one of the first 2 (updating LRU!), 6th & 7th force LRU eviction
+  const allBlocks = Array.from({ length: 16 }, (_, i) => i).sort(
+    () => Math.random() - 0.5
+  );
+  const [f0, f1, f2, f3, f4, f5] = allBlocks;
+  const assocSeq = [f0, f1, f2, f3, f0, f4, f1, f5];
+
+  // LEVEL 3: 2-Way Set Associative (2 Sets: Even blocks -> Set 0, Odd blocks -> Set 1)
+  const evens = [0, 2, 4, 6, 8, 10, 12, 14].sort(() => Math.random() - 0.5);
+  const odds = [1, 3, 5, 7, 9, 11, 13, 15].sort(() => Math.random() - 0.5);
+  const setAssocSeq = [
+    evens[0],
+    evens[1],
+    odds[0],
+    evens[0], // Hit in Set 0 (makes evens[1] the LRU in Set 0!)
+    evens[2], // Evicts evens[1] in Set 0
+    odds[1],
+    odds[2], // Evicts odds[0] in Set 1
+    evens[2], // Hit in Set 0
+  ];
+
+  return [
+    {
+      level: 1,
+      mode: 'DIRECT',
+      title: 'LEVEL 01 // DIRECT MAPPING PROTOCOL (RANDOMIZED)',
+      subtitle:
+        'Route each Main Memory block using Line = Block mod 4. Watch for Hits & Conflict Thrashing!',
+      sequence: directSeq,
+      waysPerSet: 1,
+    },
+    {
+      level: 2,
+      mode: 'ASSOCIATIVE',
+      title: 'LEVEL 02 // FULLY ASSOCIATIVE + LRU (RANDOMIZED)',
+      subtitle:
+        'Place blocks in ANY empty line! When all 4 lines are full, evict the LRU (OLDEST) block.',
+      sequence: assocSeq,
+      waysPerSet: 4,
+    },
+    {
+      level: 3,
+      mode: 'SET_ASSOCIATIVE',
+      title: 'LEVEL 03 // 2-WAY SET-ASSOCIATIVE MAPPING (RANDOMIZED)',
+      subtitle:
+        '4 Lines divided into 2 Sets (Set = Block mod 2). Fill free ways first, then evict Set LRU!',
+      sequence: setAssocSeq,
+      waysPerSet: 2,
+    },
+  ];
+}
 
 const INITIAL_LINES: CacheLineState[] = [0, 1, 2, 3].map((idx) => ({
   lineIndex: idx,
@@ -61,6 +105,8 @@ const INITIAL_LINES: CacheLineState[] = [0, 1, 2, 3].map((idx) => ({
 
 export default function CacheGame() {
   const {
+    isCacheCompleted,
+    completeCachePhase,
     setLevelConfig,
     setActiveBlock,
     recordHit,
@@ -69,6 +115,9 @@ export default function CacheGame() {
     setPhase,
   } = useGameStore();
 
+  const [levels, setLevels] = useState<LevelScenario[]>(() =>
+    generateRandomizedLevels()
+  );
   const [currentLevelIdx, setCurrentLevelIdx] = useState(0);
   const [stepIdx, setStepIdx] = useState(0);
   const [lines, setLines] = useState<CacheLineState[]>(INITIAL_LINES);
@@ -77,9 +126,15 @@ export default function CacheGame() {
     text: string;
     isError: boolean;
   } | null>(null);
-  const [isPhaseComplete, setIsPhaseComplete] = useState(false);
 
-  const scenario = CACHE_LEVELS[currentLevelIdx];
+  // Re-randomize if game is reset
+  useEffect(() => {
+    if (!isCacheCompleted && currentLevelIdx === 0 && stepIdx === 0) {
+      setLevels(generateRandomizedLevels());
+    }
+  }, [isCacheCompleted]);
+
+  const scenario = levels[currentLevelIdx];
   const currentBlock = scenario.sequence[stepIdx];
 
   useEffect(() => {
@@ -94,31 +149,34 @@ export default function CacheGame() {
     lines.find((l) => l.valid && l.blockNumber === currentBlock)?.lineIndex ??
     null;
 
-  const getIsLruCandidate = (line: CacheLineState): boolean => {
-    if (!line.valid) return false;
-    if (scenario.mode === 'ASSOCIATIVE') {
-      if (lines.some((l) => !l.valid)) return false;
-      const oldest = lines.reduce((min, curr) =>
-        curr.lastUsedStep < min.lastUsedStep ? curr : min
-      );
-      return oldest.lineIndex === line.lineIndex;
-    }
-    if (scenario.mode === 'SET_ASSOCIATIVE') {
-      const targetSet = Math.floor(line.lineIndex / scenario.waysPerSet);
-      const setLines = lines.filter(
-        (l) => Math.floor(l.lineIndex / scenario.waysPerSet) === targetSet
-      );
-      if (setLines.some((l) => !l.valid)) return false;
-      const oldestInSet = setLines.reduce((min, curr) =>
-        curr.lastUsedStep < min.lastUsedStep ? curr : min
-      );
-      return oldestInSet.lineIndex === line.lineIndex;
-    }
-    return false;
-  };
+  const getIsLruCandidate = useCallback(
+    (line: CacheLineState): boolean => {
+      if (!line.valid) return false;
+      if (scenario.mode === 'ASSOCIATIVE') {
+        if (lines.some((l) => !l.valid)) return false;
+        const oldest = lines.reduce((min, curr) =>
+          curr.lastUsedStep < min.lastUsedStep ? curr : min
+        );
+        return oldest.lineIndex === line.lineIndex;
+      }
+      if (scenario.mode === 'SET_ASSOCIATIVE') {
+        const targetSet = Math.floor(line.lineIndex / scenario.waysPerSet);
+        const setLines = lines.filter(
+          (l) => Math.floor(l.lineIndex / scenario.waysPerSet) === targetSet
+        );
+        if (setLines.some((l) => !l.valid)) return false;
+        const oldestInSet = setLines.reduce((min, curr) =>
+          curr.lastUsedStep < min.lastUsedStep ? curr : min
+        );
+        return oldestInSet.lineIndex === line.lineIndex;
+      }
+      return false;
+    },
+    [lines, scenario.mode, scenario.waysPerSet]
+  );
 
   const handleDropIntoLine = (targetLineIndex: number) => {
-    if (currentBlock === undefined) return;
+    if (isCacheCompleted || currentBlock === undefined) return;
 
     const result = validateCachePlacement(
       currentBlock,
@@ -191,180 +249,190 @@ export default function CacheGame() {
 
     if (stepIdx + 1 < scenario.sequence.length) {
       setStepIdx(stepIdx + 1);
-    } else if (currentLevelIdx + 1 < CACHE_LEVELS.length) {
-      const nextLvl = CACHE_LEVELS[currentLevelIdx + 1];
+    } else if (currentLevelIdx + 1 < levels.length) {
+      const nextLvl = levels[currentLevelIdx + 1];
       setCurrentLevelIdx(currentLevelIdx + 1);
       setStepIdx(0);
       setLines(INITIAL_LINES);
       triggerHint({
-        title: `UNLOCKED: ${nextLvl.title}`,
+        title: `LEVEL COMPLETE! UNLOCKED: ${nextLvl.title}`,
         message: nextLvl.subtitle,
         type: 'TACTICAL',
       });
     } else {
-      setIsPhaseComplete(true);
+      completeCachePhase();
     }
   };
 
-  if (isPhaseComplete) {
-    return (
-      <div className="max-w-3xl mx-auto my-12 p-8 bg-slate-900/95 border-2 border-emerald-400 rounded-2xl text-center font-mono shadow-[0_0_50px_rgba(16,185,129,0.3)]">
-        <div className="text-xs text-emerald-400 tracking-widest uppercase mb-2">
-          // MODULE 05 COMPLETE
-        </div>
-        <h2 className="text-2xl md:text-3xl font-extrabold text-white mb-3">
-          CACHE SUBSYSTEM STABILIZED
-        </h2>
-        <p className="text-sm text-slate-300 max-w-xl mx-auto mb-6 leading-relaxed">
-          You have completed Direct Mapping, Fully Associative LRU Replacement, and 2-Way Set-Associative Cache
-          Organization. Proceed to Phase 2: Instruction Pipeline Overdrive!
-        </p>
-        <div className="flex justify-center gap-4">
-          <button
-            onClick={() => {
-              setCurrentLevelIdx(0);
-              setStepIdx(0);
-              setLines(INITIAL_LINES);
-              setIsPhaseComplete(false);
-            }}
-            className="px-5 py-2.5 rounded-lg border border-slate-700 text-slate-300 text-xs font-bold hover:border-emerald-400 cursor-pointer"
-          >
-            REPLAY CACHE LEVELS
-          </button>
-          <button
-            onClick={() => setPhase('PIPELINE')}
-            className="px-6 py-2.5 rounded-lg bg-emerald-500 text-slate-950 text-xs font-extrabold hover:bg-emerald-400 shadow-[0_0_25px_rgba(16,185,129,0.5)] cursor-pointer"
-          >
-            LAUNCH PHASE 2: PIPELINE OVERDRIVE &rarr;
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <section className="max-w-6xl mx-auto w-full px-4 py-6 font-mono flex flex-col gap-6">
-      {/* Level Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/80 border border-emerald-500/30 p-4 rounded-xl">
-        <div>
-          <h1 className="text-base md:text-lg font-extrabold text-white tracking-wide">
-            {scenario.title}
-          </h1>
-          <p className="text-xs text-emerald-400/90 mt-0.5">{scenario.subtitle}</p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {CACHE_LEVELS.map((lvl, idx) => (
+    <section className="relative max-w-6xl mx-auto w-full px-4 py-6 font-mono flex flex-col gap-6">
+      {/* Greyed-Out Lock Overlay when Phase 1 is Completed */}
+      {isCacheCompleted && (
+        <div className="fixed inset-0 z-30 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="max-w-xl w-full p-8 bg-slate-900 border-2 border-emerald-400 rounded-2xl text-center shadow-[0_0_60px_rgba(16,185,129,0.35)]"
+          >
+            <div className="inline-block px-3 py-1 rounded bg-emerald-500/20 border border-emerald-400 text-emerald-300 text-xs font-extrabold uppercase mb-3">
+              🔒 PHASE 1 LOCKED &amp; COMPLETED
+            </div>
+            <h2 className="text-2xl md:text-3xl font-extrabold text-white mb-3">
+              CACHE SUBSYSTEM STABILIZED
+            </h2>
+            <p className="text-xs md:text-sm text-slate-300 mb-6 leading-relaxed">
+              All 3 Cache Mapping levels (Direct, Associative LRU, and 2-Way Set-Associative) are locked in. You must
+              now advance to <strong className="text-emerald-400">Phase 2: Instruction Pipeline Overdrive</strong> to
+              complete your system reboot!
+            </p>
             <button
-              key={lvl.level}
-              onClick={() => {
-                setCurrentLevelIdx(idx);
-                setStepIdx(0);
-                setLines(INITIAL_LINES);
-                setLastEventBanner(null);
-              }}
-              className={`px-3 py-1.5 rounded text-xs font-bold border transition-all cursor-pointer ${
-                currentLevelIdx === idx
-                  ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-extrabold'
-                  : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-emerald-500/50'
-              }`}
+              onClick={() => setPhase('PIPELINE')}
+              className="w-full py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-sm font-extrabold tracking-wider shadow-[0_0_25px_rgba(16,185,129,0.5)] cursor-pointer transition-all"
             >
-              LVL {lvl.level}
+              PROCEED TO PHASE 2: PIPELINE OVERDRIVE &rarr;
             </button>
-          ))}
+          </motion.div>
         </div>
-      </div>
+      )}
 
-      {/* Live COA Telemetry & Binary Address Split */}
-      <LiveTelemetryDashboard />
-
-      {/* Main Split Game Chamber */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* LEFT COLUMN: Draggable Main Memory Block & Request Stream */}
-        <div className="lg:col-span-5 bg-slate-900/70 border border-slate-800 rounded-xl p-5">
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-              // MAIN MEMORY STREAM
-            </span>
-            <span className="text-xs text-slate-400">
-              Request {stepIdx + 1} of {scenario.sequence.length}
-            </span>
+      {/* Main Content (Greyed out and non-interactive if completed) */}
+      <div
+        className={`flex flex-col gap-6 transition-all ${
+          isCacheCompleted ? 'opacity-25 pointer-events-none grayscale' : ''
+        }`}
+      >
+        {/* Top Level Banner & Locked Progression Indicator */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/80 border border-emerald-500/30 p-4 rounded-xl">
+          <div>
+            <h1 className="text-base md:text-lg font-extrabold text-white tracking-wide">
+              {scenario.title}
+            </h1>
+            <p className="text-xs text-emerald-400/90 mt-0.5">{scenario.subtitle}</p>
           </div>
 
-          <DraggableBlock
-            blockNumber={currentBlock}
-            dataHex={`0x${((currentBlock + 1) * 4369)
-              .toString(16)
-              .toUpperCase()
-              .padStart(4, '0')}`}
-            binaryBlock={currentBlock.toString(2).padStart(4, '0')}
-            isSelected={true}
-            alreadyInCacheLine={existingHitLine}
-            onSelect={() => {}}
-          />
-
-          <div className="mt-5">
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">
-              Upcoming CPU Block Request Queue
-            </div>
-            <div className="flex items-center gap-2 overflow-x-auto pb-1">
-              {scenario.sequence.map((blk, idx) => (
-                <span
-                  key={idx}
-                  className={`px-2.5 py-1 rounded text-xs font-bold border ${
-                    idx < stepIdx
-                      ? 'bg-slate-950/40 border-slate-900 text-slate-600 line-through'
-                      : idx === stepIdx
-                      ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300 scale-105'
-                      : 'bg-slate-950 border-slate-800 text-slate-400'
+          {/* Progression Pills (Locked so players cannot farm earlier levels) */}
+          <div className="flex items-center gap-2">
+            {levels.map((lvl, idx) => {
+              const isCompletedLvl = idx < currentLevelIdx;
+              const isCurrentLvl = idx === currentLevelIdx;
+              return (
+                <div
+                  key={lvl.level}
+                  className={`px-3 py-1.5 rounded text-xs font-bold border select-none flex items-center gap-1.5 ${
+                    isCurrentLvl
+                      ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-extrabold shadow-[0_0_12px_rgba(16,185,129,0.4)]'
+                      : isCompletedLvl
+                      ? 'bg-slate-900/60 text-emerald-500/60 border-emerald-500/20'
+                      : 'bg-slate-950/60 text-slate-600 border-slate-800'
                   }`}
                 >
-                  B{blk}
-                </span>
-              ))}
-            </div>
+                  <span>{isCompletedLvl ? '✓' : `LVL ${lvl.level}`}</span>
+                </div>
+              );
+            })}
           </div>
         </div>
 
-        {/* RIGHT COLUMN: Interactive Cache Lines */}
-        <div className="lg:col-span-7 bg-slate-900/70 border border-slate-800 rounded-xl p-5">
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-              // L1 CACHE MEMORY (4 LINES)
-            </span>
-            <span className="text-[11px] text-slate-400">
-              Drag Block B{currentBlock} onto a line (or Click a line)
-            </span>
+        {/* Live Telemetry Bar */}
+        <LiveTelemetryDashboard />
+
+        {/* Main Split Game Chamber */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* LEFT COLUMN: Main Memory Request Stream */}
+          <div className="lg:col-span-5 bg-slate-900/70 border border-slate-800 rounded-xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                // MAIN MEMORY STREAM
+              </span>
+              <span className="text-xs text-slate-400">
+                Request {stepIdx + 1} of {scenario.sequence.length}
+              </span>
+            </div>
+
+            <DraggableBlock
+              blockNumber={currentBlock}
+              dataHex={`0x${((currentBlock + 1) * 4369)
+                .toString(16)
+                .toUpperCase()
+                .padStart(4, '0')}`}
+              binaryBlock={currentBlock.toString(2).padStart(4, '0')}
+              isSelected={true}
+              alreadyInCacheLine={existingHitLine}
+              onSelect={() => {}}
+            />
+
+            {/* FIXED ALIGNMENT: Upcoming CPU Block Request Queue */}
+            <div className="mt-5 pt-4 border-t border-slate-800/80">
+              <div className="flex items-center justify-between text-[10px] text-slate-400 uppercase tracking-wider mb-2.5">
+                <span>Upcoming CPU Block Request Queue</span>
+                <span className="text-emerald-400 font-bold">
+                  Active: B{currentBlock}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-8 gap-1.5">
+                {scenario.sequence.map((blk, idx) => {
+                  const isPast = idx < stepIdx;
+                  const isCurrent = idx === stepIdx;
+                  return (
+                    <div
+                      key={idx}
+                      className={`h-8 rounded-md text-xs font-bold border flex items-center justify-center transition-all select-none ${
+                        isPast
+                          ? 'bg-slate-950/40 border-slate-900 text-slate-600 line-through'
+                          : isCurrent
+                          ? 'bg-emerald-500 text-slate-950 border-emerald-300 font-extrabold shadow-[0_0_12px_rgba(16,185,129,0.5)]'
+                          : 'bg-slate-950 border-slate-800 text-slate-400'
+                      }`}
+                    >
+                      B{blk}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
 
-          <div className="space-y-3">
-            {lines.map((line) => (
-              <CacheLine
-                key={line.lineIndex}
-                line={line}
-                mode={scenario.mode}
-                waysPerSet={scenario.waysPerSet}
-                isLruCandidate={getIsLruCandidate(line)}
-                isMatchingHit={existingHitLine === line.lineIndex}
-                onDropBlock={handleDropIntoLine}
-              />
-            ))}
-          </div>
+          {/* RIGHT COLUMN: Cache Memory Lines */}
+          <div className="lg:col-span-7 bg-slate-900/70 border border-slate-800 rounded-xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                // L1 CACHE MEMORY (4 LINES)
+              </span>
+              <span className="text-[11px] text-slate-400">
+                Drag Block B{currentBlock} onto a line (or Click a line)
+              </span>
+            </div>
 
-          {lastEventBanner && (
-            <motion.div
-              key={lastEventBanner.text}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={`mt-4 p-3 rounded-lg border text-xs font-bold ${
-                lastEventBanner.isError
-                  ? 'bg-rose-950/70 border-rose-500 text-rose-200'
-                  : 'bg-emerald-950/70 border-emerald-500/50 text-emerald-300'
-              }`}
-            >
-              {lastEventBanner.text}
-            </motion.div>
-          )}
+            <div className="space-y-3">
+              {lines.map((line) => (
+                <CacheLine
+                  key={line.lineIndex}
+                  line={line}
+                  mode={scenario.mode}
+                  waysPerSet={scenario.waysPerSet}
+                  isLruCandidate={getIsLruCandidate(line)}
+                  isMatchingHit={existingHitLine === line.lineIndex}
+                  onDropBlock={handleDropIntoLine}
+                />
+              ))}
+            </div>
+
+            {lastEventBanner && (
+              <motion.div
+                key={lastEventBanner.text}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className={`mt-4 p-3 rounded-lg border text-xs font-bold ${
+                  lastEventBanner.isError
+                    ? 'bg-rose-950/70 border-rose-500 text-rose-200'
+                    : 'bg-emerald-950/70 border-emerald-500/50 text-emerald-300'
+                }`}
+              >
+                {lastEventBanner.text}
+              </motion.div>
+            )}
+          </div>
         </div>
       </div>
     </section>

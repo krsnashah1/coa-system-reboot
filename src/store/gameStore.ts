@@ -12,13 +12,15 @@ interface HintData {
 }
 
 interface GameState {
-  // Player Identity (Asked at Start)
+  // Player Identity
   playerName: string;
   playerRegNo: string;
   hasRegistered: boolean;
 
-  // Progression & Scoring
+  // Progression & Locks
   phase: GamePhase;
+  isCacheCompleted: boolean;
+  isPipelineCompleted: boolean;
   level: number;
   mappingMode: CacheMappingMode;
   score: number;
@@ -43,6 +45,8 @@ interface GameState {
   // Actions
   setPlayerInfo: (name: string, regNo: string) => void;
   setPhase: (phase: GamePhase) => void;
+  completeCachePhase: () => void;
+  completePipelinePhase: () => void;
   setLevelConfig: (level: number, mode: CacheMappingMode, lines: number, ways?: number) => void;
   setActiveBlock: (address: number | null) => void;
   addScore: (points: number) => void;
@@ -65,6 +69,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   hasRegistered: false,
 
   phase: 'CACHE',
+  isCacheCompleted: false,
+  isPipelineCompleted: false,
   level: 1,
   mappingMode: 'DIRECT',
   score: 0,
@@ -90,7 +96,16 @@ export const useGameStore = create<GameState>((set, get) => ({
       hasRegistered: true,
     }),
 
-  setPhase: (phase) => set({ phase }),
+  setPhase: (phase) => {
+    const { isCacheCompleted, isPipelineCompleted } = get();
+    // Prevent returning to a locked/completed phase
+    if (phase === 'CACHE' && isCacheCompleted) return;
+    if (phase === 'PIPELINE' && isPipelineCompleted) return;
+    set({ phase });
+  },
+
+  completeCachePhase: () => set({ isCacheCompleted: true }),
+  completePipelinePhase: () => set({ isPipelineCompleted: true }),
 
   setLevelConfig: (level, mappingMode, totalCacheLines, waysPerSet = 1) =>
     set({ level, mappingMode, totalCacheLines, waysPerSet }),
@@ -121,7 +136,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       score: Math.max(0, state.score - 50),
       isGlitching: true,
       activeHint: {
-        title: 'CACHE MISS // MAPPING FAULT',
+        title: 'SYSTEM FAULT // PENALTY -50 PTS',
         message: reason,
         formula,
         type: 'ERROR',
@@ -151,7 +166,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         set({
           activeHint: {
             title: 'TACTICAL HINT // DIRECT MAPPING',
-            message: `Divide Block #${exampleBlock} by ${totalCacheLines} total cache lines. The remainder is the ONLY line where this block is allowed to go!`,
+            message: `Divide Block #${exampleBlock} by ${totalCacheLines} total cache lines. The remainder is the ONLY line where this block can go!`,
             formula: `Line = ${exampleBlock} mod ${totalCacheLines} = CACHE LINE ${targetLine}`,
             type: 'TACTICAL',
           },
@@ -161,7 +176,7 @@ export const useGameStore = create<GameState>((set, get) => ({
           activeHint: {
             title: 'TACTICAL HINT // FULLY ASSOCIATIVE',
             message:
-              'Place the block in ANY empty cache line (V:0). Once all 4 lines are full, you must overwrite the line marked "LRU (OLDEST)"!',
+              'Place the block in ANY empty cache line (V:0). Once all 4 lines are full, overwrite the line marked "LRU (OLDEST)"!',
             formula: 'Empty Available -> Any Free Line | Full -> Evict LRU Line',
             type: 'TACTICAL',
           },
@@ -173,7 +188,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         set({
           activeHint: {
             title: 'TACTICAL HINT // 2-WAY SET-ASSOCIATIVE',
-            message: `Block #${exampleBlock} maps to Set ${targetSet} (Lines ${targetSet * 2} & ${targetSet * 2 + 1}). Use an empty line in Set ${targetSet} first, or evict Set ${targetSet}'s LRU line!`,
+            message: `Block #${exampleBlock} maps to Set ${targetSet} (Lines ${targetSet * 2} & ${targetSet * 2 + 1}). Fill empty ways in Set ${targetSet} first, or evict Set ${targetSet}'s LRU line!`,
             formula: `Set = ${exampleBlock} mod ${totalSets} = SET ${targetSet}`,
             type: 'TACTICAL',
           },
@@ -182,10 +197,10 @@ export const useGameStore = create<GameState>((set, get) => ({
     } else {
       set({
         activeHint: {
-          title: 'TACTICAL HINT // PIPELINE HAZARDS',
+          title: 'TACTICAL HINT // PIPELINE TIMING & HAZARDS',
           message:
-            'Look at the red ⚠️ stage on the conveyor belt: use Operand Forwarding for Data Hazards (RAW), Branch Prediction/Flush for JMP Control Hazards, and Sub-stage Splitting for slow EX stages!',
-          formula: 'Optimal CPI Target = 1.00',
+            'In diagram questions, shift each instruction right until no execution stages (E) overlap in the same column! Then use Total Cycles = First_Instr_Cycles + (N - 1) × Max_Stage_Cycles.',
+          formula: 'Cycles = C1 + (N - 1) × Δ | f_max = f_mc / Δ',
           type: 'TACTICAL',
         },
       });
@@ -203,6 +218,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       cpi: 1.0,
       level: 1,
       mappingMode: 'DIRECT',
+      isCacheCompleted: false,
+      isPipelineCompleted: false,
       activeHint: null,
     }),
 }));

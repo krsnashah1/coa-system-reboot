@@ -46,7 +46,6 @@ export default function LeaderboardView() {
     } catch {}
   }, []);
 
-  // Auto-submit the player's score using the username they entered at the start!
   useEffect(() => {
     const submitAndFetch = async () => {
       if (playerName && finalEfficiencyScore > 0 && !hasPostedRef.current) {
@@ -83,7 +82,7 @@ export default function LeaderboardView() {
         <div className="flex flex-col md:flex-row items-center justify-between gap-4">
           <div>
             <span className="px-2.5 py-0.5 text-[10px] font-extrabold rounded bg-emerald-400 text-slate-950 uppercase">
-              SYSTEM REBOOT COMPLETE // ECE 2002 COA
+              SYSTEM REBOOT COMPLETE // COA SIMULATOR
             </span>
             <h1 className="text-2xl md:text-3xl font-extrabold text-white mt-2">
               LIVE CLASSROOM LEADERBOARD
@@ -123,7 +122,7 @@ export default function LeaderboardView() {
         )}
       </div>
 
-      {/* Live Rankings List */}
+      {/* Live Rankings Table */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden">
         <div className="px-6 py-3.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
           <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
@@ -187,26 +186,33 @@ export default function LeaderboardView() {
         )}
       </div>
 
-      {/* Academic References & Replay Controls */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center bg-slate-900/70 border border-slate-800 p-4 rounded-xl text-xs">
-        <div className="text-slate-400 space-y-1">
-          <div className="text-emerald-400 font-bold uppercase">
-            Academic References (COA Activity Guidelines):
+      {/* Credible Academic References & Replay Controls */}
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center bg-slate-900/70 border border-slate-800 p-4 rounded-xl text-xs">
+        <div className="md:col-span-9 text-slate-400 space-y-1 leading-relaxed">
+          <div className="text-emerald-400 font-bold uppercase mb-1">
+            Academic References &amp; Technical Sources:
           </div>
-          <div>1. William Stallings, <em>Computer Organization and Architecture (8th Ed.)</em></div>
-          <div>2. Dr. Agam Das Goswami, <em>ECE 2002 Modules 5 &amp; 6 Lecture Notes</em>, VIT-AP.</div>
+          <div>
+            1. William Stallings, <em>Computer Organization and Architecture: Designing for Performance (8th Ed.)</em>, Prentice Hall — Ch. 4 (Cache Memory) &amp; Ch. 12–14 (Instruction-Level Parallelism &amp; Pipelining).
+          </div>
+          <div>
+            2. John L. Hennessy &amp; David A. Patterson, <em>Computer Architecture: A Quantitative Approach</em>, Morgan Kaufmann — Memory Hierarchy Design &amp; Pipeline Hazard Resolution.
+          </div>
+          <div>
+            3. Alan Jay Smith, <em>&ldquo;Cache Memories,&rdquo;</em> ACM Computing Surveys (CSUR), Vol. 14, No. 3, pp. 473–530 (Associative Mapping &amp; LRU Replacement Analysis).
+          </div>
         </div>
 
-        <div className="flex justify-end gap-3">
+        <div className="md:col-span-3 flex justify-end">
           <button
             onClick={() => {
               hasPostedRef.current = false;
               resetGame();
               setPhase('CACHE');
             }}
-            className="px-5 py-2.5 rounded-lg bg-emerald-500 text-slate-950 font-extrabold hover:bg-emerald-400 cursor-pointer"
+            className="w-full md:w-auto px-5 py-2.5 rounded-lg bg-emerald-500 text-slate-950 font-extrabold hover:bg-emerald-400 cursor-pointer"
           >
-            PLAY AGAIN ↻
+            NEW RANDOMIZED RUN ↻
           </button>
         </div>
       </div>
