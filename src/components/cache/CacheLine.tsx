@@ -28,15 +28,15 @@ export default function CacheLine({
   const setNumber = Math.floor(line.lineIndex / waysPerSet);
   const wayNumber = line.lineIndex % waysPerSet;
 
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
+  const handleDragOver = (e: any) => {
+    if (e && e.preventDefault) e.preventDefault();
     setIsDragOver(true);
   };
 
   const handleDragLeave = () => setIsDragOver(false);
 
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
+  const handleDrop = (e: any) => {
+    if (e && e.preventDefault) e.preventDefault();
     setIsDragOver(false);
     onDropBlock(line.lineIndex);
   };
@@ -60,7 +60,6 @@ export default function CacheLine({
       }`}
     >
       <div className="flex items-center justify-between gap-2">
-        {/* Left: Line / Set Identifier */}
         <div className="flex items-center gap-2">
           <span className="px-2.5 py-1 rounded bg-slate-800 text-emerald-300 text-xs font-extrabold">
             LINE {line.lineIndex}
@@ -83,11 +82,10 @@ export default function CacheLine({
           </span>
         </div>
 
-        {/* Right: LRU Status or Hit Prompt */}
         <div className="flex items-center gap-2">
           {isMatchingHit && (
             <span className="px-2 py-0.5 rounded bg-amber-400 text-slate-950 text-[10px] font-extrabold animate-bounce">
-              CLICK FOR HIT!
+              ⚡ CLICK FOR CACHE HIT!
             </span>
           )}
 
@@ -102,7 +100,6 @@ export default function CacheLine({
         </div>
       </div>
 
-      {/* Cache Directory & Data Payload Row */}
       <div className="mt-2.5 grid grid-cols-12 gap-2 items-center bg-slate-950/90 p-2.5 rounded-lg border border-slate-800/80 text-xs">
         <div className="col-span-4 border-r border-slate-800 pr-2">
           <div className="text-[9px] text-slate-500 uppercase">Tag Bits</div>
@@ -115,7 +112,7 @@ export default function CacheLine({
           <div className="text-[9px] text-slate-500 uppercase">Block Stored</div>
           <div className="font-extrabold text-white mt-0.5">
             {line.valid && line.blockNumber !== null
-              ? `Block ${line.blockNumber}`
+              ? `Block #${line.blockNumber}`
               : 'EMPTY'}
           </div>
         </div>

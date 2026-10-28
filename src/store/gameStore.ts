@@ -12,6 +12,11 @@ interface HintData {
 }
 
 interface GameState {
+  // Player Identity (Asked at Start)
+  playerName: string;
+  playerRegNo: string;
+  hasRegistered: boolean;
+
   // Progression & Scoring
   phase: GamePhase;
   level: number;
@@ -24,7 +29,7 @@ interface GameState {
   misses: number;
   cpi: number;
 
-  // Active Game Context (used for smart hints)
+  // Active Game Context
   activeBlockAddress: number | null;
   totalCacheLines: number;
   waysPerSet: number;
@@ -36,6 +41,7 @@ interface GameState {
   isGlitching: boolean;
 
   // Actions
+  setPlayerInfo: (name: string, regNo: string) => void;
   setPhase: (phase: GamePhase) => void;
   setLevelConfig: (level: number, mode: CacheMappingMode, lines: number, ways?: number) => void;
   setActiveBlock: (address: number | null) => void;
@@ -44,7 +50,6 @@ interface GameState {
   recordMiss: (reason: string, formula?: string) => void;
   updateCPI: (delta: number) => void;
 
-  // Tutorial & Hint Actions
   openTutorial: (step?: number) => void;
   closeTutorial: () => void;
   setTutorialStep: (step: number) => void;
@@ -55,6 +60,10 @@ interface GameState {
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
+  playerName: '',
+  playerRegNo: '',
+  hasRegistered: false,
+
   phase: 'CACHE',
   level: 1,
   mappingMode: 'DIRECT',
@@ -67,12 +76,19 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   activeBlockAddress: null,
   totalCacheLines: 4,
-  waysPerSet: 2,
+  waysPerSet: 1,
 
-  isTutorialOpen: true, // Opens automatically on first launch
+  isTutorialOpen: true,
   tutorialStep: 0,
   activeHint: null,
   isGlitching: false,
+
+  setPlayerInfo: (name, regNo) =>
+    set({
+      playerName: name.trim().toUpperCase(),
+      playerRegNo: (regNo.trim() || 'VIT-AP').toUpperCase(),
+      hasRegistered: true,
+    }),
 
   setPhase: (phase) => set({ phase }),
 
@@ -130,16 +146,13 @@ export const useGameStore = create<GameState>((set, get) => ({
 
     if (phase === 'CACHE') {
       if (mappingMode === 'DIRECT') {
-        const exampleBlock = activeBlockAddress ?? 6;
+        const exampleBlock = activeBlockAddress ?? 4;
         const targetLine = exampleBlock % totalCacheLines;
         set({
           activeHint: {
             title: 'TACTICAL HINT // DIRECT MAPPING',
-            message:
-              activeBlockAddress !== null
-                ? `Take Block ${activeBlockAddress} and divide by total cache lines (${totalCacheLines}). The remainder is your target line!`
-                : `In Direct Mapping, each main memory block maps to exactly one cache line using the modulo operator.`,
-            formula: `Line = Block ${exampleBlock} mod ${totalCacheLines} = Line ${targetLine}`,
+            message: `Divide Block #${exampleBlock} by ${totalCacheLines} total cache lines. The remainder is the ONLY line where this block is allowed to go!`,
+            formula: `Line = ${exampleBlock} mod ${totalCacheLines} = CACHE LINE ${targetLine}`,
             type: 'TACTICAL',
           },
         });
@@ -148,31 +161,31 @@ export const useGameStore = create<GameState>((set, get) => ({
           activeHint: {
             title: 'TACTICAL HINT // FULLY ASSOCIATIVE',
             message:
-              'Any block can go into ANY available cache line! If the cache is full, overwrite the line at the top of the LRU (Least Recently Used) queue.',
-            formula: 'Target = Any Free Line | Full = Evict Oldest (LRU)',
+              'Place the block in ANY empty cache line (V:0). Once all 4 lines are full, you must overwrite the line marked "LRU (OLDEST)"!',
+            formula: 'Empty Available -> Any Free Line | Full -> Evict LRU Line',
             type: 'TACTICAL',
           },
         });
       } else {
         const totalSets = totalCacheLines / waysPerSet;
-        const exampleBlock = activeBlockAddress ?? 5;
+        const exampleBlock = activeBlockAddress ?? 2;
         const targetSet = exampleBlock % totalSets;
         set({
           activeHint: {
-            title: 'TACTICAL HINT // SET-ASSOCIATIVE',
-            message: `First find the correct Set using modulo (${totalSets} sets total). Then drop the block into ANY free line inside Set ${targetSet}.`,
-            formula: `Set = Block ${exampleBlock} mod ${totalSets} = Set ${targetSet}`,
+            title: 'TACTICAL HINT // 2-WAY SET-ASSOCIATIVE',
+            message: `Block #${exampleBlock} maps to Set ${targetSet} (Lines ${targetSet * 2} & ${targetSet * 2 + 1}). Use an empty line in Set ${targetSet} first, or evict Set ${targetSet}'s LRU line!`,
+            formula: `Set = ${exampleBlock} mod ${totalSets} = SET ${targetSet}`,
             type: 'TACTICAL',
           },
         });
       }
-    } else if (phase === 'PIPELINE') {
+    } else {
       set({
         activeHint: {
           title: 'TACTICAL HINT // PIPELINE HAZARDS',
           message:
-            'Watch the source and destination registers! If Instruction 2 reads a register that Instruction 1 is still writing to, trigger Forwarding or insert a NOP bubble.',
-          formula: 'RAW Hazard: I2 Source == I1 Destination',
+            'Look at the red ⚠️ stage on the conveyor belt: use Operand Forwarding for Data Hazards (RAW), Branch Prediction/Flush for JMP Control Hazards, and Sub-stage Splitting for slow EX stages!',
+          formula: 'Optimal CPI Target = 1.00',
           type: 'TACTICAL',
         },
       });
