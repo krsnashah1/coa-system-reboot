@@ -21,8 +21,13 @@ export default function DraggableBlock({
   alreadyInCacheLine,
   onSelect,
 }: DraggableBlockProps) {
-  const handleDragStart = (e: React.DragEvent<HTMLDivElement>) => {
-    e.dataTransfer.setData('text/plain', blockNumber.toString());
+  
+  // FIXED: Changed type to 'any' to prevent Framer Motion type clashes 
+  // with the native HTML5 Drag and Drop API
+  const handleDragStart = (e: any) => {
+    if (e.dataTransfer) {
+      e.dataTransfer.setData('text/plain', blockNumber.toString());
+    }
     onSelect();
   };
 
